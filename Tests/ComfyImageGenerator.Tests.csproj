@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework>
+    <LangVersion>latest</LangVersion><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings>
+    <SilverpineGameDir Condition="'$(SilverpineGameDir)' == ''">$(MSBuildProjectDirectory)\..\..\..</SilverpineGameDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\Workflow.cs" Link="Workflow.cs" />
+    <Compile Include="..\Detailers.cs" Link="Detailers.cs" />
+    <Compile Include="..\RegionalPrompting.cs" Link="RegionalPrompting.cs" />
+    <Compile Include="..\ComfyClient.cs" Link="ComfyClient.cs" />
+    <Compile Include="..\CharacterProfiles.cs" Link="CharacterProfiles.cs" />
+    <Compile Include="..\ScenePrompts.cs" Link="ScenePrompts.cs" />
+    <Compile Include="..\SceneContext.cs" Link="SceneContext.cs" />
+    <Compile Include="..\CharacterScenePrompts.cs" Link="CharacterScenePrompts.cs" />
+    <Compile Include="..\TemporaryImages.cs" Link="TemporaryImages.cs" />
+    <Compile Include="..\SaveImageDialog.cs" Link="SaveImageDialog.cs" />
+    <Reference Include="Newtonsoft.Json"><HintPath>$(SilverpineGameDir)\BepInEx\plugins\ModdingTools\Newtonsoft.Json.dll</HintPath></Reference>
+    <Reference Include="Mono.Cecil"><HintPath>$(SilverpineGameDir)\BepInEx\core\Mono.Cecil.dll</HintPath></Reference>
+  </ItemGroup>
+</Project>
