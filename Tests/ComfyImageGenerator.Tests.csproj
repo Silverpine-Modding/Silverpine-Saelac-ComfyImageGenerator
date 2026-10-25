@@ -7,10 +7,10 @@
   <ItemGroup>
     <Compile Include="..\Workflow.cs" Link="Workflow.cs" />
     <Compile Include="..\Detailers.cs" Link="Detailers.cs" />
-    <Compile Include="..\RegionalPrompting.cs" Link="RegionalPrompting.cs" />
     <Compile Include="..\ComfyClient.cs" Link="ComfyClient.cs" />
     <Compile Include="..\CharacterProfiles.cs" Link="CharacterProfiles.cs" />
     <Compile Include="..\ScenePrompts.cs" Link="ScenePrompts.cs" />
+    <Compile Include="..\SceneSelection.cs" Link="SceneSelection.cs" />
     <Compile Include="..\SceneContext.cs" Link="SceneContext.cs" />
     <Compile Include="..\CharacterScenePrompts.cs" Link="CharacterScenePrompts.cs" />
     <Compile Include="..\TemporaryImages.cs" Link="TemporaryImages.cs" />

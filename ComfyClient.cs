@@ -17,9 +17,8 @@ public sealed class GenerationResult
     public long Seed { get; }
     public string Directory { get; }
     public IReadOnlyList<string> Images { get; }
-    public IReadOnlyList<string> DetailerReports { get; }
-    public GenerationResult(string promptId, long seed, string directory, IReadOnlyList<string> images, IReadOnlyList<string>? detailerReports = null)
-    { PromptId = promptId; Seed = seed; Directory = directory; Images = images; DetailerReports = detailerReports ?? Array.Empty<string>(); }
+    public GenerationResult(string promptId, long seed, string directory, IReadOnlyList<string> images)
+    { PromptId = promptId; Seed = seed; Directory = directory; Images = images; }
 }
 
 public sealed class ComfyClient : IDisposable
@@ -146,7 +145,7 @@ public sealed class ComfyClient : IDisposable
                 saved.Add(path);
             }
             succeeded = true;
-            return new GenerationResult(promptId, seed, runDirectory, saved.AsReadOnly(), ReadDetailerReports(record, settings));
+            return new GenerationResult(promptId, seed, runDirectory, saved.AsReadOnly());
         }
         catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
         {
@@ -169,37 +168,6 @@ public sealed class ComfyClient : IDisposable
                 finally { if (runDirectory.Length != 0) TemporaryImages.DeleteRun(outputDirectory, runDirectory); }
             }
         }
-    }
-
-    public static IReadOnlyList<string> ReadDetailerReports(JObject record, GenerationSettings settings)
-    {
-        var reports = new List<string>();
-        if (!settings.AttentionCouple || !string.IsNullOrEmpty(settings.WorkflowFile) || !(record["outputs"] is JObject outputs)) return reports;
-        for (int i = 0; i < settings.Detailers.Count; i++)
-        {
-            DetailerSetting pass = settings.Detailers[i];
-            string id = "detailer_" + i;
-            if (!pass.Enabled || !TryDetectionCount(outputs, id + "_detected_report", out int detected)) continue;
-            for (int j = 0; j < settings.Regions.Count; j++)
-            {
-                CharacterRegion region = settings.Regions[j];
-                if ((!string.IsNullOrEmpty(pass.RegionId) && pass.RegionId != region.Id) ||
-                    !TryDetectionCount(outputs, id + "_region_" + j + "_selected_report", out int assigned) || assigned > detected) continue;
-                string report = (i + 1) + ". " + ScenePrompts.Limit(pass.Name, 100) + " / " + ScenePrompts.Limit(region.Name, 100) + $": {detected} detected, {assigned} selected for detailing.";
-                if (detected == 0) report += " No detections: check the detector model and threshold.";
-                else if (assigned == 0) report += " No detections assigned: cover at least half the face with this box; earlier regions take priority.";
-                reports.Add(report);
-                if (reports.Count >= 90) return reports;
-            }
-        }
-        return reports;
-    }
-
-    private static bool TryDetectionCount(JObject outputs, string id, out int count)
-    {
-        count = 0;
-        return outputs[id] is JObject output && output["text"] is JArray text && text.Count == 1 &&
-            text[0].Type == JTokenType.String && int.TryParse((string?)text[0], out count) && count >= 0 && count <= 10000;
     }
 
     public static void ThrowExecutionError(JObject record)

@@ -66,7 +66,7 @@ internal static class SceneCapture
         var participants = new List<NeuralNPC> { npc };
         if (NeuralNPC.multiDialogParticipants != null && NeuralNPC.multiDialogParticipants.Contains(npc))
             participants.AddRange(NeuralNPC.multiDialogParticipants.Where(n => n != null));
-        foreach (NeuralNPC participant in participants.Distinct().Take(8)) scene.Characters.Add(FromNpc(participant));
+        foreach (NeuralNPC participant in participants.Distinct()) scene.Characters.Add(FromNpc(participant));
         if (Player.Instance != null)
             scene.Characters.Insert(0, FromPlayer(Player.Instance));
         var history = npc.dialogElements.ToList();
@@ -83,14 +83,14 @@ internal static class SceneCapture
         if (WorldInfoManager.Instance != null)
             environment.Append(". Time: ").Append(WorldInfoManager.Instance.GetCurrentHourOfDayAprox()).Append(". Season: ")
                 .Append(WorldInfoManager.Instance.GetSeasonString()).Append(". Weather: ").Append(WorldInfoManager.Instance.currentWeatherName);
-        environment.Append(". Depict only the current conversation participants. Other people mentioned in the location or dialogue must remain out of frame.");
         scene.Environment = environment.ToString();
         return scene;
     }
 
     internal static async Task<string> GeneratePrompt(SceneSnapshot scene, ModelFamily family, string guidance,
-        Action<string> progress, CancellationToken cancel, GenerationSettings? regionalSettings = null)
+        Action<string> progress, CancellationToken cancel, Action<string>? reportPromptNotice = null)
     {
+        SceneSelection.Validate(scene, family);
         InferenceServerSetupHandler inference = ReadyInference();
         // Cast membership comes only from the active dialogue, never proximity,
         // environment text, mentioned names or the saved character catalog.
@@ -117,20 +117,14 @@ internal static class SceneCapture
             character.Description = saved ?? character.Description;
         }
         progress("Asking the game's LLM for an " + family + " scene prompt...");
-        if (regionalSettings?.AttentionCouple == true)
-        {
-            string regionalResponse = await ScenePrompts.AwaitLlm(inference.GenerateSimpleLowTemp(RegionalPrompts.SystemInstruction,
-                new List<string> { RegionalPrompts.Build(scene, regionalSettings.Regions, guidance) }, deterministic: false,
-                maxLength: Math.Min(3500, 450 + regionalSettings.Regions.Count * 300)), TimeSpan.FromSeconds(Plugin.LlmTimeoutSeconds.Value), cancel);
-            cancel.ThrowIfCancellationRequested();
-            return RegionalPrompts.Apply(regionalResponse, regionalSettings.Regions, scene);
-        }
         string response = await ScenePrompts.AwaitLlm(inference.GenerateSimpleLowTemp(family == ModelFamily.Anima ? CharacterScenePrompts.AnimaSystemInstruction : CharacterScenePrompts.IllustriousSystemInstruction,
             new List<string> { ScenePrompts.Build(scene, family, guidance) }, deterministic: false,
             maxLength: Math.Min(3500, 500 + scene.Characters.Count * 250)),
             TimeSpan.FromSeconds(Plugin.LlmTimeoutSeconds.Value), cancel);
         cancel.ThrowIfCancellationRequested();
-        return CharacterScenePrompts.Apply(response, scene, family);
+        string prompt = CharacterScenePrompts.Apply(response, scene, family, out string notice);
+        reportPromptNotice?.Invoke(notice);
+        return prompt;
     }
     internal static async Task<string> GenerateProfile(SceneCharacter character, CancellationToken cancel)
     {

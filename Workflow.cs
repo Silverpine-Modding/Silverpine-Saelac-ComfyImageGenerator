@@ -25,6 +25,9 @@ public sealed class GenerationSettings
     public string Positive { get; set; } = "";
     public string BasePositive { get; set; } = "";
     public string Negative { get; set; } = "";
+    // Runtime prompt ownership, not a saved profile or ComfyUI node input.
+    public List<string> SceneCharacterKeys { get; set; } = new();
+    public string PromptNotice { get; set; } = "";
     public int Width { get; set; } = 1024;
     public int Height { get; set; } = 1024;
     public int Steps { get; set; } = 30;
@@ -35,16 +38,12 @@ public sealed class GenerationSettings
     public string WorkflowFile { get; set; } = "";
     public List<LoraSetting> Loras { get; set; } = new();
     public List<DetailerSetting> Detailers { get; set; } = new();
-    public bool AttentionCouple { get; set; }
-    public double GlobalRegionStrength { get; set; } = 0.3;
-    public List<CharacterRegion> Regions { get; set; } = new();
     public bool EasyCache { get; set; }
     public double CacheThreshold { get; set; } = 0.2;
     public double CacheStart { get; set; } = 0.15;
     public double CacheEnd { get; set; } = 0.95;
 
-    public void Validate() => Validate(true);
-    public void Validate(bool requireRegionPrompts)
+    public void Validate()
     {
         if (!Enum.IsDefined(typeof(ModelFamily), Family)) throw new ArgumentException("Choose Illustrious or Anima.");
         string combinedPositive = ComposePositive(Positive);
@@ -56,22 +55,6 @@ public sealed class GenerationSettings
         if (Steps < 1 || Steps > 150) throw new ArgumentException("Steps must be between 1 and 150.");
         if (double.IsNaN(Cfg) || double.IsInfinity(Cfg) || Cfg < 0 || Cfg > 30) throw new ArgumentException("CFG must be between 0 and 30.");
         if (Seed < -1) throw new ArgumentException("Seed must be -1 (random) or a nonnegative integer.");
-        if (AttentionCouple)
-        {
-            if (Family != ModelFamily.Illustrious) throw new ArgumentException("Attention Couple mode is available only for Illustrious.");
-            if (!string.IsNullOrWhiteSpace(WorkflowFile)) throw new ArgumentException("Clear the custom workflow path to use built-in Attention Couple.");
-            if (Regions == null || Regions.Count < 1 || Regions.Count > 9 || Regions.Any(r => r == null))
-                throw new ArgumentException("Attention Couple needs 1-9 character regions.");
-            if (Regions.Select(r => r.Id).Distinct().Count() != Regions.Count || Regions.Select(r => r.CharacterIndex).Distinct().Count() != Regions.Count)
-                throw new ArgumentException("Each region must have a unique ID and dialogue character number.");
-            if (!FiniteRange(GlobalRegionStrength, .01, 1)) throw new ArgumentException("Background scene strength must be 0.01-1.");
-            foreach (CharacterRegion region in Regions)
-            {
-                region.Validate(Width, Height, requireRegionPrompts);
-                if (ComposePositive(region.Prompt).Length > 32000) throw new ArgumentException("Character prompt plus base positive prefix exceeds 32,000 characters.");
-                if (RegionalPrompts.CharacterConditioning(this, region).Length > 32000) throw new ArgumentException("Character prompt, shared composition and base style together exceed 32,000 characters.");
-            }
-        }
         if (EasyCache && (!FiniteRange(CacheThreshold, 0, 3) || !FiniteRange(CacheStart, 0, 1) || !FiniteRange(CacheEnd, 0, 1) || CacheStart >= CacheEnd))
             throw new ArgumentException("EasyCache needs threshold 0-3 and 0 <= start < end <= 1.");
         foreach (LoraSetting lora in Loras)
@@ -81,14 +64,8 @@ public sealed class GenerationSettings
         {
             if (detailer == null) throw new ArgumentException("A saved detailer is invalid. Remove it and add a new pass.");
             detailer.Validate();
-            if (detailer.Enabled && !string.IsNullOrEmpty(detailer.RegionId) && (!AttentionCouple || !Regions.Any(r => r.Id == detailer.RegionId)))
-                throw new ArgumentException("Detailer '" + detailer.Name + "' targets an unavailable character region. Enable Attention Couple and select an existing region, select Whole image, or disable this pass.");
             if (detailer.Enabled && !string.IsNullOrWhiteSpace(detailer.Positive) && ComposePositive(detailer.Positive).Length > 32000)
                 throw new ArgumentException("Detailer '" + detailer.Name + "': positive prompt plus base positive prefix exceeds 32,000 characters.");
-            if (detailer.Enabled && AttentionCouple && !string.IsNullOrWhiteSpace(detailer.Positive) &&
-                Regions.Where(r => string.IsNullOrEmpty(detailer.RegionId) || r.Id == detailer.RegionId)
-                    .Any(r => ComposePositive(r.Prompt + ", " + detailer.Positive).Length > 32000))
-                throw new ArgumentException("Detailer '" + detailer.Name + "': character prompt plus detail tags and base style exceeds 32,000 characters.");
         }
         if (!string.IsNullOrWhiteSpace(WorkflowFile) && (Loras.Count != 0 || EasyCache || Detailers.Any(d => d.Enabled)))
             throw new ArgumentException("For a custom workflow, put LoRA/cache/detailer nodes in that workflow and disable the built-in LoRA/cache/detailer settings.");
@@ -158,7 +135,7 @@ public static partial class Workflow
             modelLink = Link(id);
             if (!anima) clipLink = Link(id, 1);
         }
-        graph["4"] = Node("CLIPTextEncode", new JObject { ["text"] = s.ComposePositive(s.AttentionCouple ? RegionalPrompts.SharedComposition(s) : s.Positive), ["clip"] = clipLink });
+        graph["4"] = Node("CLIPTextEncode", new JObject { ["text"] = s.ComposePositive(s.Positive), ["clip"] = clipLink });
         graph["5"] = Node("CLIPTextEncode", new JObject { ["text"] = s.Negative, ["clip"] = clipLink.DeepClone() });
         graph["6"] = Node("EmptyLatentImage", new JObject { ["width"] = s.Width, ["height"] = s.Height, ["batch_size"] = 1 });
         // Detailer crops use the LoRA-patched model without EasyCache's sampling state.
@@ -169,9 +146,6 @@ public static partial class Workflow
                 ["start_percent"] = s.CacheStart, ["end_percent"] = s.CacheEnd, ["verbose"] = false });
             modelLink = Link("cache");
         }
-        // PPM must be the last model patch; its base conditioning is the exact
-        // same link passed to the main sampler. Cropped detailers remain unpatched.
-        if (s.AttentionCouple) modelLink = AppendAttentionCouple(graph, s, modelLink, clipLink);
         graph["7"] = Node("KSampler", new JObject
         {
             ["model"] = modelLink, ["positive"] = Link("4"), ["negative"] = Link("5"), ["latent_image"] = Link("6"),
@@ -238,16 +212,12 @@ public static partial class Workflow
             if (!(info[type] is JObject))
             {
                 string help = type == "FaceDetailer" ? " Install ComfyUI-Impact-Pack on the server."
-                    : type == "PreviewAny" ? " Update ComfyUI core on the server and refresh lists."
-                    : RegionDetailerNodes.Contains(type) || RegionDetectorNodes.Contains(type) ? " Install or update ComfyUI-Impact-Pack on the server, restart ComfyUI and refresh lists."
                     : type == "UltralyticsDetectorProvider" ? " Install ComfyUI-Impact-Subpack and a compatible detector model on the server."
-                    : type == "MaskComposite" || type == "ConditioningSetAreaStrength" ? " Update ComfyUI core on the server and refresh lists."
-                    : AttentionNodes.Contains(type) ? " Install ComfyUI-ppm on the server, restart ComfyUI and refresh lists."
                     : " Update ComfyUI or install the workflow's required nodes.";
                 throw new InvalidDataException($"ComfyUI is missing node '{type}'." + help);
             }
             // Catch changed custom-node schemas before an expensive LLM call or image job.
-            if ((type == "FaceDetailer" || AttentionNodes.Contains(type) || RegionDetailerNodes.Contains(type) || RegionDetectorNodes.Contains(type)) && info[type]?["input"]?["required"] is JObject required)
+            if (type == "FaceDetailer" && info[type]?["input"]?["required"] is JObject required)
                 foreach (JProperty input in required.Properties())
                     if (entry.Value["inputs"]?[input.Name] == null)
                         throw new InvalidDataException($"{type} requires unsupported input '{input.Name}'. Use a matching custom API workflow for this server version.");

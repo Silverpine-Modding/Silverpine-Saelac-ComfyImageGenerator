@@ -57,8 +57,7 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
     internal static void OpenScene(NeuralNPC npc)
     {
         GeneratorWindow window = Create(null);
-        window.page = 0;
-        window.BeginScene(npc);
+        window.OpenCastPicker(npc);
     }
     private static GeneratorWindow Create(ModToolSession? session)
     {
@@ -124,6 +123,8 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
     }
     private void LoadProfile()
     {
+        positive = "";
+        promptCharacterKeys.Clear();
         Profile p = family == ModelFamily.Anima ? Plugin.Anima : Plugin.Illustrious;
         model = p.Model.Value; encoder = p.Encoder.Value; vae = p.Vae.Value;
         width = p.Width.Value.ToString(Inv); height = p.Height.Value.ToString(Inv); steps = p.Steps.Value.ToString(Inv); cfg = p.Cfg.Value.ToString(Inv);
@@ -139,18 +140,18 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
         }
         catch (Exception) { status = "The saved LoRA list is invalid. Rebuild it in settings and Save settings."; }
         LoadDetailers(p);
-        LoadRegions(p);
+        lastPromptRevision = 0;
     }
     private GenerationSettings Snapshot(string prompt) => new()
     {
         Family = family, Model = model.Trim(), TextEncoder = encoder.Trim(), Vae = vae.Trim(), Positive = prompt, BasePositive = basePositive, Negative = negative,
+        SceneCharacterKeys = promptCharacterKeys.ToList(),
         Width = Int(width, "Width"), Height = Int(height, "Height"), Steps = Int(steps, "Steps"), Cfg = Number(cfg, "CFG"),
         Seed = long.TryParse(seed, NumberStyles.Integer, Inv, out long value) ? value : throw new ArgumentException("Seed must be an integer or -1 for random."),
         Sampler = sampler.Trim(), Scheduler = scheduler.Trim(),
         WorkflowFile = string.IsNullOrWhiteSpace(customWorkflow) ? "" : Path.GetFullPath(Path.IsPathRooted(customWorkflow) ? customWorkflow : Path.Combine(Plugin.PluginDirectory, customWorkflow)),
         Loras = loras.Select(l => new LoraSetting { Name = l.Name, ModelStrength = Number(l.Model, "LoRA model strength"), ClipStrength = Number(l.Clip, "LoRA CLIP strength") }).ToList(),
         Detailers = detailers.Select(d => d.Read()).ToList(),
-        AttentionCouple = attentionCouple, GlobalRegionStrength = Number(globalRegionStrength, "Background scene strength"), Regions = regions.Select(r => r.Read()).ToList(),
         EasyCache = easyCache, CacheThreshold = Number(threshold, "Cache threshold"), CacheStart = Number(cacheStart, "Cache start"), CacheEnd = Number(cacheEnd, "Cache end")
     };
     private static int Int(string text, string name) => int.TryParse(text, NumberStyles.Integer, Inv, out int value) ? value : throw new ArgumentException(name + " must be an integer.");
@@ -161,7 +162,7 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
         GenerationSettings s = Snapshot(string.IsNullOrWhiteSpace(basePositive) ? "settings validation" : "");
         // Allow the initial connection to be saved before the model has been selected.
         if (s.Model.Length == 0) s.Model = "unselected";
-        s.Validate(false);
+        s.Validate();
         string address = Address();
         Profile p = family == ModelFamily.Anima ? Plugin.Anima : Plugin.Illustrious;
         bool save = Plugin.Settings.SaveOnConfigSet;
@@ -175,7 +176,6 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
             p.BasePositive.Value = basePositive;
             p.LorasJson.Value = JsonConvert.SerializeObject(s.Loras); p.EasyCache.Value = easyCache;
             p.DetailersJson.Value = JsonConvert.SerializeObject(s.Detailers);
-            p.AttentionCouple.Value = attentionCouple; p.RegionsJson.Value = JsonConvert.SerializeObject(s.Regions); p.GlobalRegionStrength.Value = s.GlobalRegionStrength;
             p.CacheThreshold.Value = s.CacheThreshold; p.CacheStart.Value = s.CacheStart; p.CacheEnd.Value = s.CacheEnd;
         }
         finally { Plugin.Settings.SaveOnConfigSet = save; }
@@ -183,23 +183,23 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
         status = "Settings saved.";
     }
 
-    private void BeginScene(NeuralNPC npc)
+    private void BeginScene()
     {
         Try(() =>
         {
             if (GenerationService.Busy || profileBusy) throw new InvalidOperationException("Wait for the current request to finish.");
-            SceneSnapshot scene = SceneCapture.Capture(npc);
-            if (attentionCouple) BindRegions(scene);
+            SceneSnapshot scene = SelectedLiveScene();
             GenerationSettings settings = Snapshot("Scene prompt pending");
+            settings.SceneCharacterKeys = scene.Characters.Select(c => c.Key).ToList();
+            SceneSelection.ValidateGeneration(settings);
             // Preflight the exact graph before spending an LLM request. Prompts
             // are temporary only in this private generation snapshot.
-            if (settings.AttentionCouple) settings.Regions.ForEach(r => r.Prompt = "Character prompt pending");
             settings.Validate();
             SaveSettings();
             ReleasePreview();
             string sceneGuidance = guidance;
             GenerationService.Start(settings, Address(), Plugin.BearerToken.Value, Plugin.ImagesDirectory, Plugin.TimeoutMinutes.Value,
-                (progress, cancel) => SceneCapture.GeneratePrompt(scene, settings.Family, sceneGuidance, progress, cancel, settings));
+                (progress, cancel) => SceneCapture.GeneratePrompt(scene, settings.Family, sceneGuidance, progress, cancel, notice => settings.PromptNotice = notice));
             page = 0; SetPromptEditing(false); status = "";
         });
         if (!GenerationService.Busy && model.Length == 0) page = 1;
@@ -209,6 +209,7 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
         Try(() =>
         {
             GenerationSettings settings = Snapshot(positive);
+            SceneSelection.ValidateGeneration(settings);
             settings.Validate();
             SaveSettings();
             ReleasePreview();
@@ -245,12 +246,7 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
             if (GenerationService.PromptFamily == family)
             {
                 positive = GenerationService.Prompt; promptScroll = Vector2.zero;
-                string generatedRegions = GenerationService.RegionPrompts;
-                if (attentionCouple && generatedRegions.Length != 0)
-                {
-                    regions.Clear();
-                    regions.AddRange((JsonConvert.DeserializeObject<List<CharacterRegion>>(generatedRegions) ?? new()).Select(r => new RegionDraft(r)));
-                }
+                promptCharacterKeys = GenerationService.PromptCharacterKeys.ToList();
             }
         }
         GenerationResult? result = GenerationService.Result;
@@ -291,6 +287,9 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
     {
         GUI.Box(new Rect(12, 12, 1576, 876), GUIContent.none, panel);
         GUI.Label(new Rect(32, 24, 640, 40), "Comfy scene generator  /  " + family, title);
+        GUI.enabled = !GenerationService.Busy && !profileBusy;
+        if (GUI.Button(new Rect(755, 24, 275, 38), "Choose characters", button)) OpenCastPicker(NeuralNPC.currentActiveDialogNeuralNPC);
+        GUI.enabled = true;
         if (GUI.Button(new Rect(1040, 24, 165, 38), "Image viewer", button)) { page = 0; choose = null; }
         if (GUI.Button(new Rect(1215, 24, 165, 38), "Settings", button)) { page = 1; choose = null; }
         if (GUI.Button(new Rect(1390, 24, 178, 38), "Close", button)) Close();
@@ -298,16 +297,16 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
         if (choose != null) DrawChoices();
         else if (page == 0) DrawViewer();
         else if (page == 5) DrawSaveImage();
-        else if (page == 6) DrawExpandedRegions();
+        else if (page == 7) DrawCastPicker();
         else DrawSettings();
         if (Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.Escape)
-        { if (choose != null) choose = null; else if (page == 6) page = 4; else if (page == 5) { page = 0; overwriteDestination = ""; } else if (editingPrompt) SetPromptEditing(false); else Close(); Event.current.Use(); }
+        { if (choose != null) choose = null; else if (page == 5) { page = 0; overwriteDestination = ""; } else if (editingPrompt) SetPromptEditing(false); else Close(); Event.current.Use(); }
     }
     private void DrawViewer()
     {
         // Keep exactly the same image rectangle when editing. The editor extends
         // the page below the image instead of taking space away from it.
-        float contentHeight = editingPrompt ? PromptEditorTop + EditorHeight : ViewerImageHeight;
+        float contentHeight = editingPrompt ? PromptEditorTop + PromptEditorHeight : ViewerImageHeight;
         viewerScroll = GUI.BeginScrollView(new Rect(20, 78, 1568, ViewerImageHeight), viewerScroll,
             new Rect(0, 0, 1536, contentHeight), false, editingPrompt);
         Rect imageArea = new(0, 0, 1536, ViewerImageHeight);
@@ -321,14 +320,14 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
             "Generate a scene from the dialogue, or enter a prompt below. The temporary image is deleted when this viewer closes.", title);
         if (editingPrompt)
         {
-            GUI.BeginGroup(new Rect(0, PromptEditorTop, 1536, EditorHeight));
+            GUI.BeginGroup(new Rect(0, PromptEditorTop, 1536, PromptEditorHeight));
             DrawPromptEditor();
             GUI.EndGroup();
         }
         GUI.EndScrollView();
         // These controls remain reachable while the image/editor page scrolls.
         GUI.enabled = !GenerationService.Busy && !profileBusy;
-        if (GUI.Button(new Rect(32, 758, 290, 42), "Generate current dialogue", button)) Try(() => BeginScene(NeuralNPC.currentActiveDialogNeuralNPC));
+        if (GUI.Button(new Rect(32, 758, 290, 42), "Generate current dialogue", button)) OpenCastPicker(NeuralNPC.currentActiveDialogNeuralNPC);
         if (GUI.Button(new Rect(335, 758, 290, 42), editingPrompt ? "Hide prompt editor" : "Regenerate / edit prompt", button)) SetPromptEditing(!editingPrompt);
         GUI.enabled = !GenerationService.Busy && preview != null;
         if (GUI.Button(new Rect(638, 758, 290, 42), "Save As...", button)) SaveImage();
@@ -342,7 +341,7 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
     {
         editingPrompt = enabled;
         // Reveal all editor controls on opening; return to the complete image on closing/generating.
-        viewerScroll = enabled ? new Vector2(0, attentionCouple ? PromptEditorTop : PromptEditorTop + EditorHeight - ViewerImageHeight) : Vector2.zero;
+        viewerScroll = enabled ? new Vector2(0, PromptEditorTop + PromptEditorHeight - ViewerImageHeight) : Vector2.zero;
     }
 
     private void DrawPromptEditor()
@@ -350,23 +349,15 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
         // Reserve explicit space for every control: long text must never squeeze the action button.
         GUI.Label(new Rect(0, 0, 1536, 28), "Base positive prompt — styling prepended to every prompt; saved for " + family + " when you generate.", label);
         basePositive = ScrollablePrompt(new Rect(0, 34, 1536, 72), basePositive, ref basePositiveScroll);
-        GUI.Label(new Rect(0, 114, 1536, 28), attentionCouple ? "Shared scene prompt — environment, lighting and composition only. Character prompts are below." : "Scene prompt — sent after the base positive prompt above. Scroll the page up for the full-size image.", label);
+        GUI.Label(new Rect(0, 114, 1536, 28), "Scene prompt — sent after the base positive prompt above. Scroll the page up for the full-size image.", label);
         positive = ScrollablePrompt(new Rect(0, 148, 1536, 176), positive, ref promptScroll);
         GUI.Label(new Rect(0, 334, 105, 28), "Negative", label);
         negative = ScrollablePrompt(new Rect(110, 332, 1054, 58), negative, ref negativePromptScroll);
         GUI.Label(new Rect(1188, 330, 348, 26), "Seed (-1 = random)", label);
         seed = GUI.TextField(new Rect(1188, 358, 348, 32), seed, 32, field);
         float generateY = 398;
-        if (attentionCouple)
-            foreach (RegionDraft region in regions)
-            {
-                GUI.Label(new Rect(0, generateY, 1536, 30), region.Caption + " — isolated prompt; base style is prepended automatically", label);
-                region.Prompt = ScrollablePrompt(new Rect(0, generateY + 34, 1536, 116), region.Prompt, ref region.PromptScroll);
-                generateY += 164;
-            }
         GUI.enabled = !GenerationService.Busy && !profileBusy;
         if (GUI.Button(new Rect(0, generateY, 420, 42), "Regenerate with edited prompt", button)) Regenerate();
-        if (attentionCouple && GUI.Button(new Rect(440, generateY, 420, 42), "Adjust character regions", button)) page = 4;
         GUI.enabled = true;
     }
 
@@ -437,11 +428,10 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
         GUILayout.BeginHorizontal();
         if (GUILayout.Button("Connection, model & LoRAs", button, GUILayout.Height(36))) page = 1;
         if (GUILayout.Button("Detailers", button, GUILayout.Height(36))) page = 3;
-        if (GUILayout.Button("Attention Couple", button, GUILayout.Height(36))) page = 4;
         if (GUILayout.Button("Character profiles & presets", button, GUILayout.Height(36))) { page = 2; Try(RefreshCharacters); }
         GUILayout.EndHorizontal();
         scroll = GUILayout.BeginScrollView(scroll);
-        if (page == 2) DrawCharacters(); else if (page == 3) DrawDetailers(); else if (page == 4) DrawRegions(); else DrawModelSettings();
+        if (page == 2) DrawCharacters(); else if (page == 3) DrawDetailers(); else DrawModelSettings();
         GUILayout.EndScrollView();
         GUI.enabled = true;
         GUILayout.EndArea();
@@ -486,7 +476,7 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
         negative = Row("Negative prompt", negative);
         guidance = Row("Scene direction / LoRA triggers", guidance);
         GUILayout.Label("LoRAs (applied in list order; use files compatible with the selected model)", title);
-        GUILayout.Label("An SDXL / Illustrious LoRA cannot guide Anima. The filename list does not verify model architecture; check the LoRA's training base. LoRAs apply to the entire image, including every Attention Couple region.", label);
+        GUILayout.Label("An SDXL / Illustrious LoRA cannot guide Anima. The filename list does not verify model architecture; check the LoRA's training base. LoRAs apply to the entire image.", label);
         string loraNode = family == ModelFamily.Anima ? "LoraLoaderModelOnly" : "LoraLoader";
         string loraUnavailable = NodeAvailability(loraNode);
         if (loraUnavailable.Length == 0 && Workflow.Choices(info, loraNode, "lora_name").Length == 0)

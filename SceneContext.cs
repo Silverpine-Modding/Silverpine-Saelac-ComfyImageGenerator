@@ -101,12 +101,9 @@ public static class SceneIdentity
         return string.Join(", ", tags.Distinct(StringComparer.Ordinal));
     }
 
-    public static string AddTags(SceneCharacter character, string generated, bool solo = false)
+    public static string AddTags(SceneCharacter character, string generated)
     {
-        string anchor = Anchor(character);
-        if (IsExplicitlyAnthro(anchor) && Regex.IsMatch(generated, @"(?<!non-)(?<!non )\bhuman(?:s)?\b", RegexOptions.IgnoreCase))
-            throw new InvalidOperationException("The scene prompt replaced " + character.Name + " with a human.");
-        return string.Join(", ", (solo ? new[] { "solo" } : Array.Empty<string>()).Concat(Tags(character).Split(','))
+        return string.Join(", ", Tags(character).Split(',')
             .Concat(generated.Split(',')).Select(t => t.Trim()).Where(t => t.Length != 0).Distinct(StringComparer.OrdinalIgnoreCase));
     }
 

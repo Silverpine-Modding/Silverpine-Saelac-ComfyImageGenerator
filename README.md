@@ -1,18 +1,18 @@
 # Comfy Image Generator
 
-BepInEx 5 plugin for **Silverpine 1.7.3 on Windows**, version **1.6.1**.
+BepInEx 5 plugin for **Silverpine 1.7.3 on Windows**, version **1.8.0**.
 
 [Download the latest release](https://github.com/Silverpine-Modding/Silverpine-Saelac-ComfyImageGenerator/releases/latest)
 
-> **Attention Couple is experimental and can fail to follow the character prompts.**
-> Separated boxes do not guarantee separate characters, correct identities or
-> requested anatomy, including digitigrade legs. Characters may merge, be omitted,
-> exchange traits, or develop visible boundary artifacts. Version 1.6.1 fixes a
-> confirmed detailer-selection problem; it does **not** resolve all Attention
-> Couple prompt-adherence problems. See [known limitations](#attention-couple-known-limitations).
-
 Adds **Generate scene** immediately to the left of the conversation's `...`
-button. Silverpine's configured LLM reads a snapshot of the current dialogue,
+button. It opens a dark, scrollable character picker before making any LLM request.
+Choose **one or two participants for Anima**, or **exactly one for Illustrious**,
+then click **Generate selected characters**. These limits also apply to group
+dialogues. The player is optional: Anima can depict two NPCs, and Illustrious can
+depict any single NPC or the player. The header's **Choose characters** button
+reopens this picker. Changing model families resets the selection on reopening.
+
+Silverpine's configured LLM reads a snapshot of the current dialogue,
 environment and character profiles, then writes an image prompt for ComfyUI:
 
 - **Illustrious:** comma-separated booru-style visual tags.
@@ -22,9 +22,7 @@ The LLM is instructed to write each visible character in a separate paragraph,
 followed by a separate environment paragraph. Illustrious uses comma-separated
 tags within each paragraph; Anima uses sentences. Blank lines are preserved
 through cleanup, editing and the ComfyUI API. This keeps descriptions organized;
-it does not create separate regional conditioning or guarantee trait isolation.
-For Illustrious, optional **Attention Couple** uses separate character prompts
-and spatial masks instead of this combined prompt path (see below).
+the image model can still mix traits or misrender anatomy.
 
 The plugin does not add image instructions to the ongoing NPC conversation or
 modify its history. It makes separate LLM requests using the game's existing
@@ -40,26 +38,37 @@ Both model paths request separate character entries keyed to exact profile IDs.
 For Anima, the plugin places physical sentences from each selected profile at
 the start of its own paragraph, expanding `anthro` to `anthropomorphic`.
 For Illustrious, it prepends supported species, anatomy and color tags extracted
-from that same physical reference. This also applies to each Attention Couple
-region. The LLM supplies current clothing, placement, expression and action.
+from that same physical reference. The LLM supplies current clothing, placement,
+expression and action.
 The physical excerpt excludes outfit/state sentences so usual clothing does not
 override the live scene. Unknown traits are not invented, and an empty excerpt
 leaves appearance extraction to the LLM's full profile reference.
-Missing, duplicate or unauthorized character IDs, and explicit human substitutions
-for established anthro references, reject the response before image submission.
-The resulting prose remains editable through Regenerate. This improves prompt
-grounding; the image model can still misrender anatomy or mix character traits.
+**Prompt wording no longer vetoes a generation.** Human/species/anatomy wording
+is accepted for user correction. Duplicate and extra structured entries are skipped;
+missing selected entries use that character's physical and current clothing references.
+Plain prompt text is accepted even when the LLM does not return the requested JSON.
+Empty or unreadable structured replies fall back to the selected references and
+scene context. The viewer reports when these fallbacks were used. No corrective
+LLM retries are made. Review or edit the resulting prompt through **Regenerate /
+edit prompt**; profile anchors remain part of normal structured prompt assembly.
 
-**Only current conversation participants may appear in generated scenes.**
-This includes the player, the current NPC and NPCs in the active group conversation.
+**Only user-selected current conversation participants may appear in generated scenes.**
+The picker includes the player, the current NPC and NPCs in the active group conversation.
+Only selected characters' profiles and clothing reach the LLM or first-use profile
+initialization. Unselected participants are explicitly kept off-screen, even when
+they speak or interact in the dialogue. Dialogue and environment remain context.
+The selected IDs and count are checked again against the live conversation when
+you confirm generation. A character leaving the conversation requires refreshing
+the picker. These are input limits; the image checkpoint can still invent or omit
+subjects. Manual prompt edits, style prefixes and custom workflows remain editable.
 Nearby NPCs, people named in dialogue, and people described as visibly present
 in the environment are excluded unless they are actual conversation participants.
 For example, mentioning Gareth behind the bar does not add him to the image.
-Scene capture no longer looks up or supplies bystander profiles. Anima and
-Illustrious responses containing additional character IDs are rejected; their
-prompts forbid adding nonparticipants inside character or scenery paragraphs.
-Attention Couple can assign regions only to conversation participants and follows
-the same exclusion rule. The environment remains useful for scenery and lighting.
+Scene capture does not look up or supply bystander profiles. Extra structured
+character entries are omitted without rejecting the image job. The LLM is instructed
+to keep unselected people out of character and scenery paragraphs. Plain text and
+manual edits are not inspected for cast or anatomy mistakes. The environment remains
+useful for scenery and lighting.
 After updating, use **Generate current dialogue** to rebuild an old scene prompt;
 manual regeneration continues to use the text you chose to edit.
 
@@ -70,7 +79,7 @@ contribute their details. Held weapons are not listed as clothing. Loaded NPCs
 supply their live clothed/nude flag; the game does not expose an NPC outfit
 inventory through this integration. Current clothing overrides the profile's
 usual outfit. Unknown clothing state remains unknown rather than inferred nude.
-Clothing is captured when **Generate current dialogue** starts. Regenerate uses
+Clothing is captured when **Generate selected characters** is confirmed. Regenerate uses
 the existing editable prompts; generate the current dialogue again after an
 outfit change. After upgrading, use **Generate current dialogue** to create a new
 prompt with the updated cast and identity rules; Regenerate reuses existing
@@ -111,15 +120,28 @@ Do not copy game/Unity/BepInEx assemblies or duplicate ModdingTools.dll.
 5. Set width, height, **steps**, **CFG**, sampler, scheduler, and negative prompt.
    Set **Base positive prompt** for reusable styling at the start of every prompt.
    Add any desired LoRAs and scene direction / trigger words. Optional detailer
-   passes are under **Settings > Detailers**. Optional Illustrious character
-   regions are under **Settings > Attention Couple**. **Save settings**.
+   passes are under **Settings > Detailers**. **Save settings**.
 6. Load a game, finish a dialogue response, then click **Generate scene** next
-   to `...`.
+   to `...`. Choose up to two participants for Anima or one for Illustrious,
+   then click **Generate selected characters**.
 
 The connection is saved in
 `BepInEx/config/Saelac.Silverpine.ComfyImageGenerator.cfg`.
 An optional `Connection.BearerToken` supports authenticated reverse proxies.
 Credentials are not included in image files or logged by this plugin.
+
+## Updating from 1.6.x or 1.7.0
+
+Attention Couple has been removed, including the region map, masks, regional
+prompts, character-targeted detailers and PPM dependency. Ordinary detailer passes
+remain available. Old coupling settings and detailer region IDs are ignored;
+detailer settings save without region IDs. Existing enable states, models, numeric
+settings and prompt overrides are preserved. Review old positive overrides because
+they now replace the scene prompt for the full-image detailer pass.
+
+Keep your configuration and `CharacterProfiles` folder when updating. Existing
+ComfyUI custom nodes are not modified or uninstalled. This update requires a game
+restart to load the new plugin DLL; no ComfyUI restart is needed for the removal.
 
 ## Viewer and image lifetime
 
@@ -184,7 +206,7 @@ finish in the background and its result is discarded.
 Open **Settings > Character profiles & presets** after loading a game.
 
 - On first scene generation, the LLM attempts to initialize missing visual
-  profiles for that scene's participants. It extracts stable appearance from
+  profiles for that scene's selected participants only. It extracts stable appearance from
   the game's descriptions. Existing profiles are preserved. Disable this
   behavior with the first-use checkbox if desired.
 - Choose any loaded character, including the player, and edit its generation
@@ -247,171 +269,6 @@ It defaults off. Availability is checked on the server; compatibility and
 quality depend on the model and ComfyUI version. Other cache/custom-node
 workflows can be used through the custom API workflow option.
 
-## Illustrious Attention Couple
-
-This mode defaults **off** and requires `AttentionCouplePPM` and
-`LatentToMaskBB` from [ComfyUI-ppm](https://github.com/pamparamm/ComfyUI-ppm),
-plus `MaskComposite` and `ConditioningSetAreaStrength` from ComfyUI core.
-Install that package on the ComfyUI server and restart ComfyUI. In the plugin,
-**Connect / refresh lists**, then **Settings > Attention Couple**. The enable
-control remains locked until the selected server reports all required nodes. This
-built-in option is restricted to Illustrious and cannot be combined with a
-custom workflow path.
-
-1. Enable the mode and use **Use current dialogue characters** to include all
-   participants. The initial layout has two columns. Character numbers refer
-   to dialogue order: player first when present, then the current NPC and other
-   dialogue participants. Names are refreshed on every scene generation. Only
-   the listed characters are included. Add/remove regions for a smaller cast.
-2. Adjust **Left, Top, Width, Height** as percentages, measured from the top
-   left. The region map shows the entire output frame at the selected aspect
-   ratio, a pixel grid, colored outlines, character names and exact snapped
-   pixel bounds. Click a box or legend entry to highlight it. Change output
-   width/height here or in model settings. **Overlay current image** places the
-   boxes over the viewer's image when its aspect ratio matches; a mismatch
-   shows a blank frame with an explanation instead of stretching the image.
-   **Enlarge region map** opens a larger view with live percentage fields for the
-   selected box and a Save settings button; Back or Escape returns to settings.
-   **Arrange equal columns**
-   resets the rectangles without changing their IDs or detailer targets.
-   Bounds snap to eight pixels and each region must be at least 64 x 64 pixels.
-3. **Generate current dialogue** asks the LLM for a structured shared scene
-   prompt and one prompt per character, using dialogue, environment and the
-   same saved visual profiles as normal generation. Prompts are assigned by
-   region ID; missing, duplicate or unknown IDs abort generation rather than
-   mixing descriptions. Existing first-use visual profile initialization still
-   runs. **Regenerate / edit prompt** shows all these prompts separately in
-   scrolling text boxes below the full-size image.
-4. Keep the shared prompt limited to environment, lighting, subject counts and
-   composition. Keep identity traits in the relevant character prompt. The
-   base positive styling prefix is added once to each encoding. Regeneration
-   uses your edits directly, without asking the LLM again.
-
-Each region has a **Mask weight** of 0.01-1. Background scene strength defaults to 0.3
-in gaps outside character rectangles. The shared mask is cut out of all character
-rectangles; it no longer competes with their identity conditioning there. Each
-region receives its own physical tags **before the shared scene/layout**, including
-the total assigned subject count and left/center/right placement. Multi-character
-scenes add wide framing and remove standalone `solo` / `solo focus` tags from
-shared and character generation prompts, including old saved regional prompts.
-The editable originals remain intact. Single-character scenes can still use
-`solo`. Detailers use separate identity conditioning without the multiple-person
-composition. Overlapping rectangles still blend
-conditioning; strengths control their relative contribution where they overlap.
-Disjoint rectangles usually provide clearer separation. Attention
-Couple guides placement and reduces mixing; crossing subjects, overlapping
-bodies and global character LoRAs can still share traits. It is not an identity
-recognition system. Keep the base style free of character-specific attributes.
-The Attention Couple model patch is applied after LoRAs and EasyCache.
-
-**Prompt strength** is a separate per-character control, from 0.1 to 2, default 1.
-It uses PPM's supported `ConditioningSetAreaStrength` input to scale actual
-regional conditioning. Mask weights are normalized: changing a weight in an
-isolated box does not strengthen its prompt. Try small prompt-strength changes
-with a fixed seed; higher values can distort anatomy. Detailer conditioning stays
-independent. Old saved regions default to 1; refreshing dialogue characters
-retains your chosen values. Missing required nodes block activation/submission.
-
-Regional encodings now put identity before shared scenery and remove duplicate
-top-level tags without altering weighted groups or the saved styling prefix.
-Physical profile extraction no longer stops after four sentences, so late leg
-anatomy can reach both Anima prose and Illustrious tags. The LLM is instructed
-to retain digitigrade anatomy and prefer visible feet when relevant; it does
-not describe digitigrade legs as backward knees. These changes improve the
-inputs but do not establish a guarantee about generated anatomy.
-
-Boxes guide attention; they do not place or count detected bodies. Two distant
-20%-wide boxes can still yield one subject, and leave most of the frame to the
-background prompt. The map flags narrow boxes. Start with **Arrange equal
-columns**, keep faces away from dividing lines, and use a scene direction that
-shows both characters in a wide/two shot. Neither these prompts nor Attention
-Couple can guarantee the requested number of bodies for every checkpoint/seed.
-
-Region layouts, prompts, strengths and mode are stored per model profile in
-the existing BepInEx configuration when you **Save settings** or regenerate.
-Generated prompts are also retained while this game session remains open.
-Character visual profiles and their presets remain in `CharacterProfiles`.
-
-### Attention Couple: known limitations
-
-Treat this optional Illustrious mode as a composition aid that may require prompt
-editing and repeated generations. It can still merge two characters into one,
-omit a participant despite widely separated boxes, mix species/clothing/color
-traits, ignore requested leg anatomy, or produce a seam through a subject near a
-region boundary. Narrow boxes and higher prompt strength do not guarantee a fix.
-Face detailing can improve detected faces, but cannot reliably repair an incorrect
-body or restore a character that was never generated.
-
-The LLM and image workflow are separate sources of error. Review each character's
-actual prompt in **Regenerate / edit prompt** before judging the coupler: a
-conflicting term such as a legless body description can defeat a request for
-digitigrade legs. Keep character-specific traits out of the shared style prefix
-unless they should apply to every character. No additional automatic anatomy
-checks or corrective retries are included in this release.
-
-Start with equal columns, keep faces away from dividing lines, and use a fixed
-seed when comparing small prompt or strength changes. You can disable Attention
-Couple and use ordinary generation. Neither mode guarantees the intended result.
-
-Controlled tests used the same seed and LLM-generated character prompts for
-uncoupled, previous-coupling and updated-coupling workflows. Coupling improved
-some identity/outfit assignments, but digitigrade anatomy and color fidelity
-remained inconsistent. These samples establish known failure cases, not a
-measured reliability rate across checkpoints or scenes.
-
-### Character-specific detailing
-
-In **Settings > Detailers**, each pass can target **All character regions** or
-**Choose character region** while Attention Couple is enabled. Outside coupled
-mode, the default is **Whole image**. Character targets require the Attention Couple
-mode, its nodes, Impact Pack's `DetailerForEach`, `BboxDetectorSEGS` /
-`SegmDetectorSEGS`, `MaskToSEGS`, `ImpactSEGSIntersectionFilter` and
-`ImpactCount_Elts_in_SEGS`, plus core `PreviewAny`, Impact Subpack's detector
-provider and an installed detector model.
-Target selection and activation are blocked when their dependencies are absent.
-
-This is entirely a generated workflow using existing nodes. The mod does not
-ship a companion node or modify any ComfyUI/PPM/Impact source files. If the above
-nodes are already loaded, no ComfyUI restart is needed for this mod update.
-
-Each configured pass detects **once on the full image**, before any character
-is detailed. Existing intersection filters keep detections with **at least half
-of their mask inside a character box**, then remove selected detections before
-considering the next region. Earlier regions take priority in overlaps and
-exact 50/50 ties, including when a pass targets only one character. Near-identical
-duplicate masks are removed as well. The entire segmentation mask and padded
-sampling crop remain intact even across a rectangle edge. A detection cannot
-be selected twice within the same pass. Faces outside every box, or with less
-than half their mask in any box, are skipped. This differs from the experimental
-1.6.0 companion's largest-bounding-box-overlap rule. Assignment is spatial;
-it does not recognize identities.
-
-Impact Pack blends the selected detections using their original masks and the
-pass's Feather setting. This replaces the overly strict padded-crop containment
-filter from 1.5.x, which could detect faces then reject every one. A face at a
-boundary is neither split into halves nor rejected simply for its context crop.
-Pixels across the box edge can change within the complete detection's mask.
-Base generation can still produce a divided subject at an attention boundary;
-whole-face detailing does not guarantee reconstruction of a badly formed body.
-
-**All character regions** details each region's assigned detections in sequence
-using that character's prompt plus base style. Positive detail tags supplement
-identity; negative overrides replace the inherited negative. It uses the
-LoRA-patched model without Attention Couple or EasyCache, which carry full-image
-state inappropriate for crops. Later configured passes detect again on the
-previous pass's final image. The viewer's final status reports detected and
-selected counts, including zero detections and zero selected detections.
-These are selection counts, not a claim that every selected face improved.
-Multi-class detector models process all detected labels. Use a face-only detector
-for a pass intended only for faces; a general detector can select other body parts
-or false positives as well.
-
-Outside Attention Couple,
-whole-image detailers affect all detections and can mix identities. Removing a targeted
-region blocks that pass until you choose another target or disable it.
-Turning Attention Couple off disables character-targeted passes while retaining
-their settings; re-enable those passes explicitly when using the mode again.
-
 ## Detailer passes
 
 Open **Settings > Detailers**, then **+ Add detailer**. Add as many passes as
@@ -422,10 +279,9 @@ and closing the viewer cancels the entire workflow, including detailer passes.
 
 Each pass has its own detector model, steps, CFG, denoise, crop guide/max size,
 detection threshold, dilation, crop factor, feathering and cycle count. Sampler
-and scheduler inherit the base settings when blank. Outside Attention Couple,
-positive/negative prompt overrides replace the corresponding scene prompt for
-that pass. In coupled mode, positive text adds detail tags to each target's own
-prompt; negative text still overrides the negative prompt. Blank fields inherit.
+and scheduler inherit the base settings when blank. Positive/negative prompt
+overrides replace the corresponding scene prompt for that pass. Blank fields inherit.
+Detectors scan the full image; each detection uses its complete mask and padded crop.
 The base positive styling prefix is also prepended to each
 positive override. Use a compatible face, hand or other detector from the list.
 Segmentation detectors also supply their segmentation masks. SAM refinement and
@@ -442,8 +298,7 @@ been verified here.
 
 The window displays requirements beside optional features. Connect to your
 server before activating them. Missing nodes disable **Enable EasyCache**,
-**+ Add LoRA**, **+ Add detailer**, **Enable Attention Couple**, character target
-selection, detailer activation, and selection of a model
+**+ Add LoRA**, **+ Add detailer**, detailer activation, and selection of a model
 family whose required core nodes are missing. Detailers also need at least one
 installed detector, and a disabled pass cannot be enabled with an unavailable
 detector. **Choose** buttons require an installed choice reported by the server.
@@ -457,8 +312,6 @@ Changing the server address locks these controls until that server is checked.
 | Illustrious LoRAs | Core `LoraLoader` and compatible LoRA files |
 | Anima LoRAs | Core `LoraLoaderModelOnly` and compatible LoRA files |
 | EasyCache | Native `EasyCache`; update ComfyUI if missing |
-| Illustrious Attention Couple | `AttentionCouplePPM`, `LatentToMaskBB` from [ComfyUI-ppm](https://github.com/pamparamm/ComfyUI-ppm), core `MaskComposite` and `ConditioningSetAreaStrength` |
-| Character-specific detailers | Attention Couple requirements, Impact Pack `DetailerForEach`, `BboxDetectorSEGS` / `SegmDetectorSEGS`, `MaskToSEGS`, `ImpactSEGSIntersectionFilter`, `ImpactCount_Elts_in_SEGS`, core `PreviewAny`, Impact Subpack `UltralyticsDetectorProvider` and detector weights |
 | Detailers | `FaceDetailer` from [ComfyUI-Impact-Pack](https://github.com/ltdrdata/ComfyUI-Impact-Pack) and `UltralyticsDetectorProvider` from [ComfyUI-Impact-Subpack](https://github.com/ltdrdata/ComfyUI-Impact-Subpack) |
 | Detector models | Compatible detector weights under `ComfyUI/models/ultralytics/bbox` or `ComfyUI/models/ultralytics/segm` |
 
@@ -467,7 +320,7 @@ then **Connect / refresh lists**. The plugin does not install these automaticall
 Saved options remain editable/removable if they become unavailable. Every job
 checks fresh server metadata before submission; scene generation also checks
 the workflow before asking the LLM. Missing nodes, missing selected files and
-unsupported required detailer/regional node inputs stop the job with an explanation.
+unsupported required detailer inputs stop the job with an explanation.
 
 ## Custom API workflows
 
@@ -489,7 +342,7 @@ Example: `"text": "{{positive}}"`, `"seed": "{{seed}}"`. Numeric placeholders
 become JSON numbers. Prompts are inserted as JSON values, so quotes and
 backslashes remain safe. Unmarked inputs retain their workflow values.
 Put LoRA, cache and detailer nodes directly inside a custom workflow, and
-clear/disable the built-in LoRA/cache/detailer/Attention Couple controls to avoid ambiguous settings. Include a
+clear/disable the built-in LoRA/cache/detailer controls to avoid ambiguous settings. Include a
 PreviewImage or SaveImage output returning PNG or JPEG.
 
 ## Limits and validation
@@ -518,20 +371,11 @@ dotnet run --project ./Tests/ComfyImageGenerator.Tests.csproj -c Release "-p:Sil
 
 The test runner requires .NET 9. Game, Unity, BepInEx and Modding Tools assemblies
 are referenced from that installation and are not redistributed in this repository.
-The optional Python mask/filter regression tests use an existing ComfyUI Python
-environment and Impact Pack installation:
-
-```powershell
-& "C:\ComfyUI\.venv\Scripts\python.exe" -B ./Tests/test_impact_regions.py "C:\ComfyUI\custom_nodes\ComfyUI-Impact-Pack"
-```
-
 The checks use a mock HTTP handler and the installed game assemblies. They
-cover workflow wiring, LoRA chains/cache, ordered detailer chains, regional
-conditioning and prompt strength, shared multi-character layout, single-snapshot
-full-image detection with whole-face assignment, detection reports, stable character-target
-IDs, structured LLM parsing, node and model
+cover workflow wiring, LoRA chains/cache, ordered detailer chains, permissive
+LLM parsing and reference fallbacks, removed legacy settings, node and model
 requirements, separated prompt blocks, reusable positive prefixes and repeated
-generation, typed templates, character presets, strict participant-only casts,
+generation, typed templates, character presets, user-selected cast limits,
 per-character clothing context, permanent save paths and overwrite protection,
 LLM cancellation, job errors/timeouts, submission races, job-ID cancellation,
 and temporary-image cleanup. A real ComfyUI generation and in-game visual
@@ -545,9 +389,5 @@ use a simulated ComfyUI API and do not verify GPU output quality or live GUI lay
 - [Official Anima workflow](https://github.com/Comfy-Org/workflow_templates/blob/main/templates/image_anima_base_v1.json)
 - [Anima model variants](https://huggingface.co/circlestone-labs/Anima)
 - [Native EasyCache implementation](https://github.com/Comfy-Org/ComfyUI/blob/master/comfy_extras/nodes_easycache.py)
-- [Attention Couple PPM implementation](https://github.com/pamparamm/ComfyUI-ppm/blob/master/src/nodes_ppm/attention_couple_ppm.py)
-- [PPM bounding-box masks](https://github.com/pamparamm/ComfyUI-ppm/blob/master/src/nodes_ppm/latent_misc.py)
-- [Impact Pack detection hooks](https://github.com/ltdrdata/ComfyUI-Impact-Pack/blob/Main/modules/impact/hooks.py)
-- [Impact Pack SEGS filters](https://github.com/ltdrdata/ComfyUI-Impact-Pack/blob/Main/modules/impact/segs_nodes.py)
 
 Created by Saelac and ChatGPT.

@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -12,22 +13,23 @@ internal static class GenerationService
     private static string status = "Connect to ComfyUI, select your model, and enter a prompt.";
     private static GenerationResult? result;
     private static string prompt = "";
-    private static string regionPrompts = "";
     private static int promptRevision;
     private static ModelFamily promptFamily;
+    private static string[] promptCharacterKeys = Array.Empty<string>();
     private static bool discard;
     internal static bool Busy { get { lock (Gate) return cancellation != null; } }
     internal static string Status { get { lock (Gate) return status; } }
     internal static GenerationResult? Result { get { lock (Gate) return result; } }
     internal static string Prompt { get { lock (Gate) return prompt; } }
-    internal static string RegionPrompts { get { lock (Gate) return regionPrompts; } }
     internal static int PromptRevision { get { lock (Gate) return promptRevision; } }
     internal static ModelFamily PromptFamily { get { lock (Gate) return promptFamily; } }
+    internal static string[] PromptCharacterKeys { get { lock (Gate) return promptCharacterKeys.ToArray(); } }
     private static void SetStatus(string text) { lock (Gate) status = text; }
 
     internal static void Start(GenerationSettings settings, string address, string bearerToken, string directory, int minutes,
         Func<Action<string>, CancellationToken, Task<string>>? promptFactory = null)
     {
+        SceneSelection.ValidateGeneration(settings);
         settings.Validate();
         ComfyClient.NormalizeAddress(address);
         CancellationTokenSource source;
@@ -61,8 +63,8 @@ internal static class GenerationService
                 lock (Gate)
                 {
                     prompt = settings.Positive;
-                    regionPrompts = settings.AttentionCouple ? Newtonsoft.Json.JsonConvert.SerializeObject(settings.Regions) : "";
                     promptFamily = settings.Family;
+                    promptCharacterKeys = settings.SceneCharacterKeys.ToArray();
                     promptRevision++;
                 }
                 GenerationResult generated = await Task.Run(() => client.GenerateAsync(settings, directory, TimeSpan.FromMinutes(minutes), SetStatus, source.Token)).ConfigureAwait(false);
@@ -73,7 +75,7 @@ internal static class GenerationService
                     {
                         result = generated;
                         status = $"Generated image. Seed: {generated.Seed}. Use Save As to keep it.";
-                        if (generated.DetailerReports.Count > 0) status += "\n" + string.Join("\n", generated.DetailerReports);
+                        if (settings.PromptNotice.Length > 0) status += "\n" + settings.PromptNotice;
                     }
                 }
             }

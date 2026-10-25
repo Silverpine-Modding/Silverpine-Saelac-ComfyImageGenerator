@@ -14,7 +14,7 @@ public sealed class Plugin : BaseUnityPlugin
 {
     public const string PluginGuid = "Saelac.Silverpine.ComfyImageGenerator";
     public const string PluginName = "Comfy Image Generator";
-    public const string PluginVersion = "1.6.1";
+    public const string PluginVersion = "1.8.0";
     internal static ManualLogSource Log = null!;
     internal static ConfigFile Settings = null!;
     internal static ConfigEntry<string> Server = null!, BearerToken = null!;
@@ -26,7 +26,6 @@ public sealed class Plugin : BaseUnityPlugin
     internal static CharacterProfileStore Profiles = null!;
     internal static Profile Illustrious = null!, Anima = null!;
     internal static string PluginDirectory = "", ImagesDirectory = "";
-    internal static Profile CurrentProfile => Family.Value == ModelFamily.Anima ? Anima : Illustrious;
 
     private void Awake()
     {
@@ -63,9 +62,6 @@ internal sealed class Profile
     internal readonly ConfigEntry<double> Cfg;
     internal readonly ConfigEntry<bool> EasyCache;
     internal readonly ConfigEntry<double> CacheThreshold, CacheStart, CacheEnd;
-    internal readonly ConfigEntry<bool> AttentionCouple;
-    internal readonly ConfigEntry<string> RegionsJson;
-    internal readonly ConfigEntry<double> GlobalRegionStrength;
     internal Profile(ConfigFile config, ModelFamily family)
     {
         Family = family;
@@ -83,9 +79,6 @@ internal sealed class Profile
         WorkflowFile = config.Bind(section, "WorkflowFile", "", "Optional API-format workflow template path, absolute or relative to the plugin directory. See README for placeholders.");
         LorasJson = config.Bind(section, "Loras", "[]", "Ordered list of LoRAs, with Name, ModelStrength and ClipStrength. Edit using the generator window.");
         DetailersJson = config.Bind(section, "Detailers", "[]", "Ordered optional Impact Pack detailer passes. Configure detectors, sampling and prompts in the Detailers tab.");
-        AttentionCouple = config.Bind(section, "AttentionCouple", false, "Optional Illustrious regional prompts. Requires ComfyUI-ppm; ignored for Anima.");
-        RegionsJson = config.Bind(section, "CharacterRegions", "[]", "Character rectangles, dialogue indices and editable prompts. Detailer targets use stable region IDs.");
-        GlobalRegionStrength = config.Bind(section, "GlobalRegionStrength", .3, "Shared background mask strength in gaps outside character rectangles, 0.01-1. Keep identity traits out of the shared prompt and style prefix.");
         BasePositive = config.Bind(section, "BasePositivePrompt", "", "Reusable styling prefix prepended to every positive prompt, including regeneration and detailer overrides. Applied directly without an LLM rewrite. Blank disables it.");
         Negative = config.Bind(section, "NegativePrompt", "low quality, blurry, text, watermark", "Negative prompt used for scene generation.");
         EasyCache = config.Bind(section, "EasyCache", false, "Enable the server's native experimental EasyCache node. Model compatibility/quality varies.");

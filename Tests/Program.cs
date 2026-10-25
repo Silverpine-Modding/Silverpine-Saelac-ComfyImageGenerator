@@ -24,10 +24,10 @@ internal static partial class Program
         Directory.CreateDirectory(Root);
         try
         {
-            Workflows(); DetailerWorkflows(); RegionalWorkflows(); DetailerReports(); RegionalLlmPrompts(); SceneUnderstanding(); AnimaIdentity(); SaveDialogRequests(); Profiles(); Prompts(); BasePositivePrompts();
+            Workflows(); DetailerWorkflows(); SceneUnderstanding(); SceneSelections(); AnimaIdentity(); PromptTolerance(); SaveDialogRequests(); Profiles(); Prompts(); BasePositivePrompts();
             await LlmWaits();
             await ApiSuccess();
-            await RegionalApi();
+            await PermissivePromptApi();
             await CancelQueued();
             await CancelDuringSubmission();
             await ApiErrors();
@@ -283,7 +283,6 @@ internal static partial class Program
         internal JObject Nodes = Info(Settings());
         internal string ViewQuery = "";
         internal JObject? SubmittedGraph;
-        internal JObject? ExtraOutputs;
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancel)
         {
             string route = request.RequestUri!.AbsolutePath.Replace("/proxy/", "");
@@ -314,7 +313,6 @@ internal static partial class Program
                 cancel.ThrowIfCancellationRequested();
                 if (NeverComplete || History == 1) return Json(new JObject());
                 JObject completed = Done(Id, FailHistory);
-                if (ExtraOutputs != null) ((JObject)completed[Id]!["outputs"]!).Merge(ExtraOutputs);
                 return Json(completed);
             }
             if (route == "view")
@@ -424,10 +422,19 @@ internal static partial class Program
         var patches = assembly.MainModule.Types.Single(t => t.Name == "DialogueSceneButtonPatch");
         Check(patches.CustomAttributes.Any(a => a.AttributeType.Name == "HarmonyPatch"), "direct ellipsis-adjacent UI injection installed");
         var window = assembly.MainModule.Types.Single(t => t.Name == "GeneratorWindow");
+        Check(assembly.MainModule.Types.All(t => t.Name != "RegionalPrompts" && t.Name != "CharacterRegion") && window.Methods.All(m => !m.Name.Contains("Region")), "coupler graph builder and region UI removed from compiled plugin");
         Check(window.Methods.Single(m => m.Name == "Close").Body.Instructions.Any(i => i.Operand is Mono.Cecil.MethodReference r && r.Name == "CloseViewer"), "Close invokes job cancellation and cleanup");
         var dialog = assembly.MainModule.Types.Single(t => t.Name == "SaveImageDialog");
         Check(dialog.Methods.All(m => !m.IsPInvokeImpl) && dialog.NestedTypes.Count == 0, "Save As has no native dialog or recursive marshaled data structure");
         Check(window.Methods.Any(m => m.Name == "DrawSaveImage") && window.Methods.Any(m => m.Name == "WriteSavedImage"), "dark in-game save form included in installed plugin");
+        Check(window.Methods.Single(m => m.Name == "OpenScene").Body.Instructions.Any(i => i.Operand is Mono.Cecil.MethodReference r && r.Name == "OpenCastPicker"), "dialogue scene button opens character picker before generation");
+        Check(window.Methods.Single(m => m.Name == "SelectedLiveScene").Body.Instructions.Any(i => i.Operand is Mono.Cecil.MethodReference r && r.DeclaringType.Name == "SceneSelection" && r.Name == "Select"), "production UI filters recaptured dialogue through cast limits");
+        var generation = assembly.MainModule.Types.Single(t => t.Name == "GenerationService");
+        Check(generation.Methods.Single(m => m.Name == "Start").Body.Instructions.Any(i => i.Operand is Mono.Cecil.MethodReference r && r.DeclaringType.Name == "SceneSelection" && r.Name == "ValidateGeneration"), "every production submission including regeneration checks selected cast limits");
+        var capture = assembly.MainModule.Types.Single(t => t.Name == "SceneCapture");
+        var promptState = capture.NestedTypes.Single(t => t.Name.StartsWith("<GeneratePrompt>"));
+        var calls = promptState.Methods.Single(m => m.Name == "MoveNext").Body.Instructions.Where(i => i.Operand is Mono.Cecil.MethodReference).Select(i => (Mono.Cecil.MethodReference)i.Operand).ToList();
+        Check(calls.FindIndex(r => r.DeclaringType.Name == "SceneSelection" && r.Name == "Validate") < calls.FindIndex(r => r.Name == "ReadyInference") && calls.Any(r => r.DeclaringType.Name == "SceneSelection" && r.Name == "Validate"), "cast validated before profile or scene LLM requests");
     }
 
     private static void SaveDialogRequests()

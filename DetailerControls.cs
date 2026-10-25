@@ -14,7 +14,7 @@ internal sealed partial class GeneratorWindow
     {
         internal bool Enabled, NoiseMask, ForceInpaint;
         internal string Name, Detector, Steps, Cfg, Denoise, Sampler, Scheduler, GuideSize, MaxSize,
-            DetectionThreshold, Dilation, CropFactor, Feather, Cycles, Positive, Negative, RegionId;
+            DetectionThreshold, Dilation, CropFactor, Feather, Cycles, Positive, Negative;
         internal bool Expanded = true;
 
         internal DetailerDraft(DetailerSetting s)
@@ -24,7 +24,7 @@ internal sealed partial class GeneratorWindow
             Sampler = s.Sampler; Scheduler = s.Scheduler; GuideSize = s.GuideSize.ToString(Inv); MaxSize = s.MaxSize.ToString(Inv);
             DetectionThreshold = s.DetectionThreshold.ToString(Inv); Dilation = s.Dilation.ToString(Inv); CropFactor = s.CropFactor.ToString(Inv);
             Feather = s.Feather.ToString(Inv); Cycles = s.Cycles.ToString(Inv); NoiseMask = s.NoiseMask; ForceInpaint = s.ForceInpaint;
-            Positive = s.Positive; Negative = s.Negative; RegionId = s.RegionId ?? "";
+            Positive = s.Positive; Negative = s.Negative;
         }
 
         internal DetailerSetting Read() => new()
@@ -34,7 +34,7 @@ internal sealed partial class GeneratorWindow
             GuideSize = Int(GuideSize, Name + " guide size"), MaxSize = Int(MaxSize, Name + " max size"),
             DetectionThreshold = Number(DetectionThreshold, Name + " detection threshold"), Dilation = Int(Dilation, Name + " dilation"),
             CropFactor = Number(CropFactor, Name + " crop factor"), Feather = Int(Feather, Name + " feather"), Cycles = Int(Cycles, Name + " cycles"),
-            NoiseMask = NoiseMask, ForceInpaint = ForceInpaint, Positive = Positive, Negative = Negative, RegionId = RegionId
+            NoiseMask = NoiseMask, ForceInpaint = ForceInpaint, Positive = Positive, Negative = Negative
         };
     }
 
@@ -64,15 +64,8 @@ internal sealed partial class GeneratorWindow
 
     private string DetailerAvailability()
     {
-        string unavailable = NodeAvailability(attentionCouple ? new[] { "UltralyticsDetectorProvider" } : new[] { "FaceDetailer", "UltralyticsDetectorProvider" });
+        string unavailable = NodeAvailability("FaceDetailer", "UltralyticsDetectorProvider");
         if (unavailable.Length != 0) return unavailable;
-        if (attentionCouple)
-        {
-            unavailable = RegionDetailerAvailability();
-            if (unavailable.Length != 0) return unavailable;
-            unavailable = NodeAvailability(Workflow.RegionDetectorNodes);
-            if (unavailable.Length != 0) return unavailable;
-        }
         if (Workflow.Choices(info, "UltralyticsDetectorProvider", "model_name").Length == 0)
             return "Unavailable: no detector models installed. Add a compatible model under ComfyUI/models/ultralytics/bbox or segm, then refresh lists.";
         if (!string.IsNullOrWhiteSpace(customWorkflow))
@@ -101,7 +94,7 @@ internal sealed partial class GeneratorWindow
         GUILayout.Label("Requires FaceDetailer from ComfyUI-Impact-Pack, UltralyticsDetectorProvider from ComfyUI-Impact-Subpack, and a compatible detector model. Install these on the ComfyUI server, then Connect / refresh lists.", label);
         string unavailable = DetailerAvailability();
         GUILayout.Label(unavailable.Length == 0 ? "Required nodes and detector models are available on the connected server." : unavailable, label);
-        GUILayout.Label("Each pass uses the selected model, encoder, VAE and LoRAs. EasyCache and Attention Couple patches apply only to base generation. Regional detailing uses Impact Pack's DetailerForEach, BboxDetectorSEGS / SegmDetectorSEGS, MaskToSEGS, ImpactSEGSIntersectionFilter and ImpactCount_Elts_in_SEGS, plus core PreviewAny. No Silverpine companion node is needed. Anima needs a compatible Impact Pack version.", label);
+        GUILayout.Label("Each pass uses the selected model, encoder, VAE and LoRAs. EasyCache applies only to base generation. Detectors scan the full image; each detected face or object is detailed with its complete mask and crop. Anima needs a compatible Impact Pack version.", label);
         GUILayout.Label("Multi-class detector models process every detected label. Use a face-only detector for a pass intended only for faces.", label);
         bool controlsEnabled = GUI.enabled;
         int moveFrom = -1, moveTo = -1, remove = -1;
@@ -115,8 +108,7 @@ internal sealed partial class GeneratorWindow
             GUILayout.Label("Pass " + (i + 1), title, GUILayout.Width(110));
             d.Name = GUILayout.TextField(d.Name, 128, field, GUILayout.MinWidth(250));
             bool detectorAvailable = detectors.Contains(d.Detector.Trim());
-            bool targetAvailable = d.RegionId.Length == 0 || (RegionDetailerAvailability().Length == 0 && regions.Any(r => r.Id == d.RegionId));
-            GUI.enabled = controlsEnabled && (d.Enabled || (unavailable.Length == 0 && detectorAvailable && targetAvailable));
+            GUI.enabled = controlsEnabled && (d.Enabled || (unavailable.Length == 0 && detectorAvailable));
             d.Enabled = GUILayout.Toggle(d.Enabled, " Enabled", GUILayout.Width(150));
             GUI.enabled = controlsEnabled && i > 0;
             if (GUILayout.Button("Up", button, GUILayout.Width(80))) { moveFrom = i; moveTo = i - 1; }
@@ -128,7 +120,6 @@ internal sealed partial class GeneratorWindow
             if (unavailable.Length == 0 && !detectorAvailable)
                 GUILayout.Label("This pass's detector is unavailable. Choose an installed detector before enabling or generating.", label);
             if (!d.Expanded) continue;
-            DrawDetailerTarget(d);
             d.Detector = PickRow("Detector model", d.Detector, "UltralyticsDetectorProvider", "model_name", v => d.Detector = v);
             GUILayout.BeginHorizontal(); Small("Steps", ref d.Steps); Small("CFG", ref d.Cfg); Small("Denoise", ref d.Denoise); GUILayout.EndHorizontal();
             GUILayout.BeginHorizontal(); Small("Guide size", ref d.GuideSize); Small("Max size", ref d.MaxSize); Small("Cycles", ref d.Cycles); GUILayout.EndHorizontal();
@@ -140,7 +131,7 @@ internal sealed partial class GeneratorWindow
             d.NoiseMask = GUILayout.Toggle(d.NoiseMask, " Limit noise to detected mask", GUILayout.Width(400));
             d.ForceInpaint = GUILayout.Toggle(d.ForceInpaint, " Force inpaint even without upscaling", GUILayout.Width(500));
             GUILayout.EndHorizontal();
-            GUILayout.Label(attentionCouple ? "Extra detail tags (added to the character's own prompt; blank keeps its identity and scene)" : "Positive override (blank inherits the scene prompt; base style is always added)", label);
+            GUILayout.Label("Positive override (blank inherits the scene prompt; base style is always added)", label);
             d.Positive = GUILayout.TextArea(d.Positive, 32000, field, GUILayout.MinHeight(80));
             GUILayout.Label("Negative prompt override (blank inherits the base negative prompt)", label);
             d.Negative = GUILayout.TextArea(d.Negative, 32000, field, GUILayout.MinHeight(60));
