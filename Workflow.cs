@@ -38,6 +38,10 @@ public sealed class GenerationSettings
     public string WorkflowFile { get; set; } = "";
     public List<LoraSetting> Loras { get; set; } = new();
     public List<DetailerSetting> Detailers { get; set; } = new();
+    public PortraitReferenceSettings PortraitSettings { get; set; } = new();
+    [Newtonsoft.Json.JsonIgnore] public List<PortraitReference> Portraits { get; set; } = new();
+    [Newtonsoft.Json.JsonIgnore] public string PortraitUploadNamespace { get; set; } = "";
+    [Newtonsoft.Json.JsonIgnore] public string PortraitNotice { get; set; } = "";
     public bool EasyCache { get; set; }
     public double CacheThreshold { get; set; } = 0.2;
     public double CacheStart { get; set; } = 0.15;
@@ -67,8 +71,9 @@ public sealed class GenerationSettings
             if (detailer.Enabled && !string.IsNullOrWhiteSpace(detailer.Positive) && ComposePositive(detailer.Positive).Length > 32000)
                 throw new ArgumentException("Detailer '" + detailer.Name + "': positive prompt plus base positive prefix exceeds 32,000 characters.");
         }
-        if (!string.IsNullOrWhiteSpace(WorkflowFile) && (Loras.Count != 0 || EasyCache || Detailers.Any(d => d.Enabled)))
-            throw new ArgumentException("For a custom workflow, put LoRA/cache/detailer nodes in that workflow and disable the built-in LoRA/cache/detailer settings.");
+        PortraitSettings.Validate(Family);
+        if (!string.IsNullOrWhiteSpace(WorkflowFile) && (Loras.Count != 0 || EasyCache || Detailers.Any(d => d.Enabled) || PortraitSettings.Enabled))
+            throw new ArgumentException("For a custom workflow, put LoRA/cache/detailer/portrait nodes in that workflow and disable these built-in options.");
         if (string.IsNullOrWhiteSpace(WorkflowFile))
         {
             if (string.IsNullOrWhiteSpace(Model)) throw new ArgumentException("Select the model filename from your ComfyUI server.");
@@ -140,6 +145,8 @@ public static partial class Workflow
         graph["6"] = Node("EmptyLatentImage", new JObject { ["width"] = s.Width, ["height"] = s.Height, ["batch_size"] = 1 });
         // Detailer crops use the LoRA-patched model without EasyCache's sampling state.
         JArray detailerModelLink = (JArray)modelLink.DeepClone();
+        // Portrait references guide the full scene, not each individual detailer crop.
+        modelLink = AppendPortraitReferences(graph, s, modelLink);
         if (s.EasyCache)
         {
             graph["cache"] = Node("EasyCache", new JObject { ["model"] = modelLink, ["reuse_threshold"] = s.CacheThreshold,
@@ -216,6 +223,11 @@ public static partial class Workflow
                     : " Update ComfyUI or install the workflow's required nodes.";
                 throw new InvalidDataException($"ComfyUI is missing node '{type}'." + help);
             }
+            if (entry.Name == "portrait_apply" && type == "AnimaIPAdapterApply")
+            {
+                string issue = PortraitRequirements.AnimaSupportIssue(info);
+                if (issue.Length > 0) throw new InvalidDataException(issue);
+            }
             // Catch changed custom-node schemas before an expensive LLM call or image job.
             if (type == "FaceDetailer" && info[type]?["input"]?["required"] is JObject required)
                 foreach (JProperty input in required.Properties())
@@ -224,6 +236,8 @@ public static partial class Workflow
             foreach (JProperty input in ((JObject)entry.Value["inputs"]!).Properties())
             {
                 if (input.Value.Type != JTokenType.String) continue;
+                // Temp uploads are deliberately absent from LoadImage's input-folder dropdown.
+                if (type == "LoadImage" && input.Name == "image") continue;
                 string[] options = Choices(info, type, input.Name);
                 JToken? definition = info[type]?["input"]?["required"]?[input.Name] ?? info[type]?["input"]?["optional"]?[input.Name];
                 bool isChoice = definition is JArray d && d.Count > 0 && d[0] is JArray;

@@ -1,0 +1,279 @@
+--- a/nodes.py
++++ b/nodes.py
+@@ -1,3 +1,9 @@
++# SPDX-License-Identifier: Apache-2.0
++# Modified for Silverpine Comfy Image Generator, 2026-10-26.
++# Based on LuciferTC9527/ComfyUI-Anima_IP-Adapter at
++# 6b77cd0c367d76402174ace2be50d3cb6aa77855. See LICENSE and NOTICE.
++# Changes: 28-to-40 block mapping, native LoRA composition, capability marker,
++# separately encoded portraits with matching null tokens, and ComfyUI device selection.
+ """
+ Anima IP-Adapter ComfyUI nodes (SigLIP2 version, self-contained).
+ 
+@@ -18,6 +24,8 @@
+ import os
+ import folder_paths
+ import comfy.ops
++import comfy.model_management as model_management
++import comfy.lora
+ import torch
+ import torch.nn as nn
+ import torch.nn.functional as F
+@@ -31,6 +39,19 @@
+ SIGLIP_HIDDEN_SIZE = 768
+ SIGLIP_NUM_TOKENS = 1024
+ SIGLIP_IMAGE_SIZE = 512
++
++# Anima-2.9B inserts these layers among the original 28, rather than appending.
++# Source: Gazingstars123/Anima-2.9B, expand_manifest.json.
++_ANIMA_29B_INSERTED_BLOCKS = frozenset((2, 5, 8, 11, 14, 17, 21, 24, 27, 30, 33, 36))
++
++
++def _adapter_block_map(adapter_blocks, model_blocks):
++    """Map checkpoint block indices to the matching diffusion-model layers."""
++    if adapter_blocks == 28 and model_blocks == 40:
++        original_layers = (i for i in range(40) if i not in _ANIMA_29B_INSERTED_BLOCKS)
++        return dict(enumerate(original_layers))
++    # Preserve upstream behavior for native-depth adapters and other layouts.
++    return {i: i for i in range(min(adapter_blocks, model_blocks))}
+ 
+ 
+ # ═══════════════════════════════════════════════════════════════════════════════
+@@ -82,21 +103,6 @@
+             shared_module.to(x.device)
+             return shared_module(x)
+     return _Ref()
+-
+-
+-class _LoRALinear(nn.Module):
+-    """Minimal LoRA wrapper for inference."""
+-    def __init__(self, base: nn.Linear, lora_A: torch.Tensor, lora_B: torch.Tensor, scale: float):
+-        super().__init__()
+-        self.base = base
+-        self.lora_A = nn.Parameter(lora_A.to(device=base.weight.device, dtype=base.weight.dtype))
+-        self.lora_B = nn.Parameter(lora_B.to(device=base.weight.device, dtype=base.weight.dtype))
+-        self.scale = scale
+-
+-    def forward(self, x):
+-        lora_A = self.lora_A.to(device=x.device, dtype=x.dtype)
+-        lora_B = self.lora_B.to(device=x.device, dtype=x.dtype)
+-        return self.base(x) + (x @ lora_A.T @ lora_B.T) * self.scale
+ 
+ 
+ # ═══════════════════════════════════════════════════════════════════════════════
+@@ -394,6 +400,21 @@
+         },)
+ 
+ 
++def _match_separate_null_tokens(null_tokens, tokens, reference_count):
++    """Repeat per-reference nulls, preserving the full positive-token sequence."""
++    if null_tokens.ndim != 3 or null_tokens.shape[-1] != tokens.shape[-1]:
++        raise ValueError("Unsupported null-token shape for separate references.")
++    if null_tokens.shape[0] == reference_count:
++        result = null_tokens.reshape(1, -1, null_tokens.shape[-1])
++    elif null_tokens.shape[0] == 1:
++        result = null_tokens.repeat(1, reference_count, 1)
++    else:
++        raise ValueError("Null tokens must describe one reference or the complete reference batch.")
++    if result.shape != tokens.shape:
++        raise ValueError("Null-token sequence does not match separately encoded portraits.")
++    return result
++
++
+ class AnimaIPAdapterApply:
+     """Encodes ref image through SigLIP2, injects IP tokens via transformer_options.
+     Creates ip_k_proj / ip_v_proj on each block at apply time if not present.
+@@ -426,6 +447,9 @@
+                                           "tooltip": "ON: encode gray image as null token. OFF: use checkpoint null_tokens or zeros."}),
+                 "use_lora": ("BOOLEAN", {"default": True,
+                                          "tooltip": "ON: apply LoRA weights to cross-attention layers. OFF: skip LoRA."}),
++            },
++            "optional": {
++                "ref_image_2": ("IMAGE", {"tooltip": "Experimental: encode a second portrait separately and concatenate feature tokens, without a shared reference canvas. One image per input."}),
+             }
+         }
+ 
+@@ -433,19 +457,24 @@
+     RETURN_NAMES = ("model",)
+     FUNCTION = "apply"
+ 
+-    def apply(self, model, ip_adapter, ref_image, strength, ref_image_size=512, siglip_layer=-1, ip_cfg_scale=4.0, ip_cfg_separate=False, gray_null=False, use_lora=True):
++    def apply(self, model, ip_adapter, ref_image, strength, ref_image_size=512, siglip_layer=-1, ip_cfg_scale=4.0, ip_cfg_separate=False, gray_null=False, use_lora=True, ref_image_2=None):
+         patched_model = model.clone()
+         siglip_encoder = ip_adapter["siglip_encoder"]
+         ip_weights = ip_adapter["ip_weights"]
+         num_blocks = ip_adapter["num_blocks"]
+         ip_embed_dim = ip_adapter["ip_embed_dim"]
+         inner_dim = ip_adapter["inner_dim"]
+-        device = torch.device("cuda")
++        device = model_management.get_torch_device()
+ 
+         model_dtype = next(patched_model.model.diffusion_model.parameters()).dtype
+         use_shared = ip_adapter.get("use_shared_projection", False)
+         ip_norm_keys = ip_adapter.get("ip_norm_keys", False)
+         ip_inject_before_mlp = ip_adapter.get("ip_inject_before_mlp", False)
++        dit = patched_model.model.diffusion_model
++        block_map = _adapter_block_map(num_blocks, len(dit.blocks))
++        if any(source != target for source, target in block_map.items()):
++            print(f"[AnimaIPAdapter] Remapping {num_blocks}-block adapter to "
++                  f"{len(dit.blocks)}-block Anima original layers: {list(block_map.values())}")
+ 
+         # ── Shared projection path ──
+         if use_shared:
+@@ -479,9 +508,8 @@
+                     if key in ip_weights:
+                         p.data.copy_(ip_weights[key].to(dtype=p.dtype, device=p.device))
+ 
+-            for i, block in enumerate(dit.blocks):
+-                if i >= num_blocks:
+-                    break
++            for i, target_i in block_map.items():
++                block = dit.blocks[target_i]
+                 block_device = next(block.parameters()).device
+                 if not hasattr(block, 'ip_k_proj'):
+                     block.ip_k_proj = _make_shared_proj_ref(dit.shared_ip_k_proj)
+@@ -516,10 +544,9 @@
+                         bp[pname].data.copy_(ip_weights[key].to(
+                             dtype=bp[pname].dtype, device=bp[pname].device))
+         else:
+-            # ── Per-block path (original, untouched) ──
+-            for i, block in enumerate(patched_model.model.diffusion_model.blocks):
+-                if i >= num_blocks:
+-                    break
++            # Checkpoint keys keep their original indices; model targets may shift.
++            for i, target_i in block_map.items():
++                block = dit.blocks[target_i]
+                 block_device = next(block.parameters()).device
+                 if not hasattr(block, 'ip_k_proj'):
+                     block.ip_k_proj = _make_linear(ip_embed_dim, inner_dim, bias=True,
+@@ -558,38 +585,31 @@
+                             device=block_params[pname].device,
+                         ))
+ 
+-        # ── Install / restore LoRA wrappers on cross-attention layers ──
++        # Use native model patches so ordinary LoRAs keep their weight paths and
++        # compose with this bundled LoRA. Wrapping Linear modules hides 112 of
++        # SilverpineAnimaV2's patches from ComfyUI's dynamic weight loader.
+         lora_weights = ip_adapter.get("lora_weights", {})
+         lora_rank = ip_adapter.get("lora_rank", 0)
+         dit = patched_model.model.diffusion_model
+-        _lora_attrs = ("q_proj", "k_proj", "v_proj", "output_proj")
+         if use_lora and lora_weights and lora_rank:
+-            alpha = lora_rank
+-            scale = alpha / lora_rank
++            tensors = {}
++            targets = {}
+             for bi, layers in lora_weights.items():
+-                if bi >= len(dit.blocks):
++                target_bi = block_map.get(bi)
++                if target_bi is None:
+                     continue
+-                block = dit.blocks[bi]
+                 for ln, ab_dict in layers.items():
+                     if "A" not in ab_dict or "B" not in ab_dict:
+                         continue
+-                    original = getattr(block.cross_attn, ln, None)
+-                    if original is None or isinstance(original, _LoRALinear):
+-                        continue
+-                    wrapper = _LoRALinear(original, ab_dict["A"], ab_dict["B"], scale)
+-                    setattr(block.cross_attn, ln, wrapper)
+-            print(f"[AnimaIPAdapter] LoRA installed on {len(lora_weights)} blocks")
+-        else:
+-            # Unwrap any previously installed LoRA → restore original layers
+-            _unwrapped = 0
+-            for _blk in dit.blocks:
+-                for _ln in _lora_attrs:
+-                    _mod = getattr(_blk.cross_attn, _ln, None)
+-                    if isinstance(_mod, _LoRALinear):
+-                        setattr(_blk.cross_attn, _ln, _mod.base)
+-                        _unwrapped += 1
+-            if _unwrapped:
+-                print(f"[AnimaIPAdapter] LoRA unwrapped on {_unwrapped} layers")
++                    prefix = f"anima_ip_{bi}_{ln}"
++                    tensors[prefix + ".lora_down.weight"] = ab_dict["A"]
++                    tensors[prefix + ".lora_up.weight"] = ab_dict["B"]
++                    tensors[prefix + ".alpha"] = torch.tensor(float(lora_rank))
++                    targets[prefix] = f"diffusion_model.blocks.{target_bi}.cross_attn.{ln}.weight"
++            patches = comfy.lora.load_lora(tensors, targets)
++            applied = patched_model.add_patches(patches, 1.0, 1.0)
++            print(f"[AnimaIPAdapter] Bundled LoRA: {len(applied)} native weight patches "
++                  f"on {len(block_map)} mapped blocks (compatible with additional LoRAs)")
+ 
+         # ── Monkey-patch block forward for IP cross-attention ──
+         # Each DiT block's forward is replaced so that after the original
+@@ -601,9 +621,8 @@
+         # to prevent double-patching when apply() is called multiple times
+         # (model.clone() shares block objects).
+         _patched_count = 0
+-        for _i, _blk in enumerate(patched_model.model.diffusion_model.blocks):
+-            if _i >= num_blocks:
+-                break
++        for _i in block_map.values():
++            _blk = dit.blocks[_i]
+             if not getattr(_blk, 'use_ip_adapter', False):
+                 continue
+ 
+@@ -703,9 +722,13 @@
+             return norm(T.ToTensor()(square))
+ 
+         pil_images = []
+-        for b in range(ref_image.shape[0]):
+-            arr = (ref_image[b].cpu().numpy() * 255).astype(np.uint8)
+-            pil_images.append(PILImage.fromarray(arr, mode="RGB"))
++        references = [ref_image] if ref_image_2 is None else [ref_image, ref_image_2]
++        if ref_image_2 is not None and any(image.shape[0] != 1 for image in references):
++            raise ValueError("Separate portrait inputs each require exactly one image.")
++        for reference in references:
++            for b in range(reference.shape[0]):
++                arr = (reference[b].cpu().numpy() * 255).astype(np.uint8)
++                pil_images.append(PILImage.fromarray(arr, mode="RGB"))
+ 
+         tensors = []
+         for img in pil_images:
+@@ -742,6 +765,14 @@
+         if ip_self_attn is not None:
+             ip_self_attn.to(device)
+             ip_tokens = ip_self_attn(ip_tokens)
++
++        # All vision encoding, learned compression and self-attention above operate
++        # independently per portrait. Only combine along the token sequence here.
++        # No portrait index/left-right embedding is introduced at this boundary.
++        reference_count = len(references)
++        if reference_count > 1:
++            ip_tokens = ip_tokens.reshape(1, -1, ip_tokens.shape[-1])
++            print(f"[AnimaIPAdapter] Separate portrait encoding: {reference_count} references, concatenated tokens")
+ 
+         print(f"[AnimaIPAdapter] ip_tokens shape={list(ip_tokens.shape)}, "
+               f"norm={ip_tokens.norm().item():.4f}, strength={strength}")
+@@ -780,10 +811,12 @@
+             null_tokens_stored = null_tokens_stored.detach().to(dtype=model_dtype)
+         elif null_tokens_stored is not None:
+             null_tokens_stored = null_tokens_stored.to(dtype=model_dtype, device=device)
+-            if null_tokens_stored.shape != ip_tokens_stored.shape:
++            if reference_count == 1 and null_tokens_stored.shape != ip_tokens_stored.shape:
+                 null_tokens_stored = null_tokens_stored.expand_as(ip_tokens_stored)
+         else:
+             null_tokens_stored = torch.zeros_like(ip_tokens_stored)
++        if reference_count > 1 and null_tokens_stored.shape != ip_tokens_stored.shape:
++            null_tokens_stored = _match_separate_null_tokens(null_tokens_stored, ip_tokens_stored, reference_count)
+         print(f"[AnimaIPAdapter] null_tokens norm={null_tokens_stored.norm().item():.4f}" +
+               (" (gray)" if gray_null else " (checkpoint)" if ip_adapter.get("null_tokens") is not None else " (zeros)"))
+ 
+@@ -940,7 +973,7 @@
+         siglip_encoder = ip_adapter["siglip_encoder"]
+         ip_weights = ip_adapter["ip_weights"]
+         num_blocks = ip_adapter["num_blocks"]
+-        device = torch.device("cuda")
++        device = model_management.get_torch_device()
+ 
+         norm_tf = T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+ 
+@@ -1051,3 +1084,8 @@
+     "AnimaIPAdapterApply": "Anima IP-Adapter Apply (SigLIP2)",
+     "AnimaIPAdapterVisualize": "Anima IP Attn Heatmap",
+ }
++
++# Silverpine compatibility update: tested block mapping and native LoRA patches.
++AnimaIPAdapterApply.DESCRIPTION = 'Silverpine portrait compatibility v1: tested 28-to-40 block mapping and native LoRA composition.'
++
++# Optional experiment; the original single-image path remains unchanged.

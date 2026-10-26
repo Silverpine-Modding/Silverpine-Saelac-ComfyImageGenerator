@@ -21,7 +21,7 @@ public sealed class GenerationResult
     { PromptId = promptId; Seed = seed; Directory = directory; Images = images; }
 }
 
-public sealed class ComfyClient : IDisposable
+public sealed partial class ComfyClient : IDisposable
 {
     private const int JsonLimit = 16 * 1024 * 1024;
     private const int ImageLimit = 32 * 1024 * 1024;
@@ -93,6 +93,11 @@ public sealed class ComfyClient : IDisposable
             progress("Checking ComfyUI nodes and model filenames...");
             JObject info = await CheckConnectionAsync(token).ConfigureAwait(false);
             Workflow.ValidateServer(graph, info);
+            if (settings.PortraitSettings.Enabled && settings.Portraits.Count > 0)
+            {
+                progress("Uploading selected character portraits...");
+                await UploadPortraitsAsync(settings, graph, token).ConfigureAwait(false);
+            }
             token.ThrowIfCancellationRequested();
             runDirectory = Path.Combine(outputDirectory, DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N").Substring(0, 8));
             Directory.CreateDirectory(runDirectory);
@@ -253,13 +258,16 @@ public sealed class ComfyClient : IDisposable
         catch (JsonException ex) { throw new InvalidDataException("ComfyUI returned invalid JSON for " + route + ". Check the server URL.", ex); }
     }
 
-    private async Task<byte[]> SendAsync(HttpMethod method, string route, JObject? body, int limit, CancellationToken cancel)
+    private Task<byte[]> SendAsync(HttpMethod method, string route, JObject? body, int limit, CancellationToken cancel) =>
+        SendContentAsync(method, route, body == null ? null : new StringContent(body.ToString(Formatting.None), Encoding.UTF8, "application/json"), limit, cancel);
+
+    private async Task<byte[]> SendContentAsync(HttpMethod method, string route, HttpContent? content, int limit, CancellationToken cancel)
     {
         using CancellationTokenSource requestLifetime = CancellationTokenSource.CreateLinkedTokenSource(cancel);
         requestLifetime.CancelAfter(requestTimeout);
         CancellationToken token = requestLifetime.Token;
         using var request = new HttpRequestMessage(method, route);
-        if (body != null) request.Content = new StringContent(body.ToString(Formatting.None), Encoding.UTF8, "application/json");
+        request.Content = content;
         try
         {
             using HttpResponseMessage response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);

@@ -12,6 +12,8 @@ public sealed class CharacterProfile
     public string Name { get; set; } = "";
     public string Description { get; set; } = "";
     public string Source { get; set; } = "Manual";
+    public PortraitSource PortraitSource { get; set; }
+    public string PortraitFile { get; set; } = "";
 }
 
 public sealed class CharacterProfileStore
@@ -27,11 +29,14 @@ public sealed class CharacterProfileStore
         string path = Path.Combine(root, "active.json");
         if (File.Exists(path)) profiles = Read(path);
     }
-    public void Set(string key, string name, string description, string source = "Manual")
+    public void Set(string key, string name, string description, string source = "Manual", PortraitSource? portraitSource = null, string? portraitFile = null)
     {
         if (string.IsNullOrWhiteSpace(description) || description.Length > 8000) throw new ArgumentException("A character description must contain 1-8000 characters.");
+        profiles.TryGetValue(key, out CharacterProfile? existing);
         var updated = new Dictionary<string, CharacterProfile>(profiles, StringComparer.Ordinal)
-        { [key] = new CharacterProfile { Name = name, Description = description.Trim(), Source = source } };
+        { [key] = new CharacterProfile { Name = name, Description = description.Trim(), Source = source,
+            PortraitSource = portraitSource ?? existing?.PortraitSource ?? PortraitSource.Current,
+            PortraitFile = portraitFile?.Trim() ?? existing?.PortraitFile ?? "" } };
         WriteActive(updated);
         profiles = updated;
     }
@@ -78,7 +83,8 @@ public sealed class CharacterProfileStore
         {
             CharacterProfile? value = property.Value.ToObject<CharacterProfile>();
             if ((!property.Name.StartsWith("npc:", StringComparison.Ordinal) && !property.Name.StartsWith("player:", StringComparison.Ordinal)) ||
-                value == null || string.IsNullOrWhiteSpace(value.Name) || string.IsNullOrWhiteSpace(value.Description) || value.Description.Length > 8000)
+                value == null || string.IsNullOrWhiteSpace(value.Name) || string.IsNullOrWhiteSpace(value.Description) || value.Description.Length > 8000 ||
+                !Enum.IsDefined(typeof(PortraitSource), value.PortraitSource) || value.PortraitFile == null || value.PortraitFile.Length > 4096)
                 throw new InvalidDataException("Invalid character profile: " + property.Name);
             result.Add(property.Name, value);
         }

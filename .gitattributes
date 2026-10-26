@@ -1,0 +1,6 @@
+AnimaCompatibility/* text eol=lf
+AnimaCompatibility/*.patch -whitespace
+Tests/Installer/*.py text eol=lf
+Tests/AnimaNode/*.py text eol=lf
+*.sh text eol=lf
+*.command text eol=lf

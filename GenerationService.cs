@@ -76,6 +76,7 @@ internal static class GenerationService
                         result = generated;
                         status = $"Generated image. Seed: {generated.Seed}. Use Save As to keep it.";
                         if (settings.PromptNotice.Length > 0) status += "\n" + settings.PromptNotice;
+                        if (settings.PortraitNotice.Length > 0) status += "\n" + settings.PortraitNotice;
                     }
                 }
             }
@@ -83,8 +84,9 @@ internal static class GenerationService
             catch (Exception ex)
             {
                 SetStatus(ex.Message);
-                // Avoid logging endpoints, credentials, and prompts from server errors.
-                Plugin.Log.LogWarning(ex is ComfyCancellationException ? ex.Message : "Image generation failed (" + ex.GetType().Name + "). See the generator window for details.");
+                // Stack traces locate runtime failures without logging exception
+                // messages that may contain endpoints, credentials or prompts.
+                Plugin.Log.LogWarning("Image generation failed. " + GenerationDiagnostics.ForLog(ex));
             }
             finally
             {

@@ -140,6 +140,7 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
         }
         catch (Exception) { status = "The saved LoRA list is invalid. Rebuild it in settings and Save settings."; }
         LoadDetailers(p);
+        LoadPortraitSettings(p);
         lastPromptRevision = 0;
     }
     private GenerationSettings Snapshot(string prompt) => new()
@@ -152,6 +153,7 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
         WorkflowFile = string.IsNullOrWhiteSpace(customWorkflow) ? "" : Path.GetFullPath(Path.IsPathRooted(customWorkflow) ? customWorkflow : Path.Combine(Plugin.PluginDirectory, customWorkflow)),
         Loras = loras.Select(l => new LoraSetting { Name = l.Name, ModelStrength = Number(l.Model, "LoRA model strength"), ClipStrength = Number(l.Clip, "LoRA CLIP strength") }).ToList(),
         Detailers = detailers.Select(d => d.Read()).ToList(),
+        PortraitSettings = ReadPortraitSettings(),
         EasyCache = easyCache, CacheThreshold = Number(threshold, "Cache threshold"), CacheStart = Number(cacheStart, "Cache start"), CacheEnd = Number(cacheEnd, "Cache end")
     };
     private static int Int(string text, string name) => int.TryParse(text, NumberStyles.Integer, Inv, out int value) ? value : throw new ArgumentException(name + " must be an integer.");
@@ -176,6 +178,7 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
             p.BasePositive.Value = basePositive;
             p.LorasJson.Value = JsonConvert.SerializeObject(s.Loras); p.EasyCache.Value = easyCache;
             p.DetailersJson.Value = JsonConvert.SerializeObject(s.Detailers);
+            p.PortraitJson.Value = JsonConvert.SerializeObject(s.PortraitSettings);
             p.CacheThreshold.Value = s.CacheThreshold; p.CacheStart.Value = s.CacheStart; p.CacheEnd.Value = s.CacheEnd;
         }
         finally { Plugin.Settings.SaveOnConfigSet = save; }
@@ -192,6 +195,7 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
             GenerationSettings settings = Snapshot("Scene prompt pending");
             settings.SceneCharacterKeys = scene.Characters.Select(c => c.Key).ToList();
             SceneSelection.ValidateGeneration(settings);
+            PortraitCapture.Capture(settings);
             // Preflight the exact graph before spending an LLM request. Prompts
             // are temporary only in this private generation snapshot.
             settings.Validate();
@@ -210,6 +214,7 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
         {
             GenerationSettings settings = Snapshot(positive);
             SceneSelection.ValidateGeneration(settings);
+            PortraitCapture.Capture(settings);
             settings.Validate();
             SaveSettings();
             ReleasePreview();
@@ -428,10 +433,11 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
         GUILayout.BeginHorizontal();
         if (GUILayout.Button("Connection, model & LoRAs", button, GUILayout.Height(36))) page = 1;
         if (GUILayout.Button("Detailers", button, GUILayout.Height(36))) page = 3;
+        if (GUILayout.Button("Portrait references", button, GUILayout.Height(36))) page = 4;
         if (GUILayout.Button("Character profiles & presets", button, GUILayout.Height(36))) { page = 2; Try(RefreshCharacters); }
         GUILayout.EndHorizontal();
         scroll = GUILayout.BeginScrollView(scroll);
-        if (page == 2) DrawCharacters(); else if (page == 3) DrawDetailers(); else DrawModelSettings();
+        if (page == 2) DrawCharacters(); else if (page == 3) DrawDetailers(); else if (page == 4) DrawPortraitSettings(); else DrawModelSettings();
         GUILayout.EndScrollView();
         GUI.enabled = true;
         GUILayout.EndArea();
@@ -569,6 +575,7 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
         if (characters.Count == 0) { characterText = ""; return; }
         SceneCharacter character = characters[selectedCharacter];
         characterText = Plugin.Profiles.Description(character.Key) ?? character.Description;
+        LoadCharacterPortrait(character.Key);
     }
     private void DrawCharacters()
     {
@@ -586,10 +593,11 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
                 ShowChoices("Character", characters.Select(c => c.Name + "  [" + c.Key + "]").ToArray(), v => { selectedCharacter = Array.IndexOf(characters.Select(c => c.Name + "  [" + c.Key + "]").ToArray(), v); LoadCharacter(); });
             GUILayout.EndHorizontal();
             characterText = GUILayout.TextArea(characterText, 8000, field, GUILayout.Height(245));
+            DrawCharacterPortrait();
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button("Save character profile", button, GUILayout.Height(38))) Try(() => { Plugin.Profiles.Set(character.Key, character.Name, characterText); status = "Saved profile for " + character.Name + "."; });
+            if (GUILayout.Button("Save character profile", button, GUILayout.Height(38))) Try(() => { Plugin.Profiles.Set(character.Key, character.Name, characterText, "Manual", characterPortraitSource, characterPortraitFile); status = "Saved profile and portrait choice for " + character.Name + "."; });
             if (GUILayout.Button("Ask LLM for profile draft", button, GUILayout.Height(38))) GenerateProfileDraft(character);
-            if (GUILayout.Button("Reset to game description", button, GUILayout.Height(38))) Try(() => { Plugin.Profiles.Reset(character.Key); characterText = character.Description; status = "Using game description; first-use initialization may run again."; });
+            if (GUILayout.Button("Reset to game description", button, GUILayout.Height(38))) Try(() => { Plugin.Profiles.Reset(character.Key); characterText = character.Description; LoadCharacterPortrait(character.Key); status = "Using game description and current dialogue portrait; first-use initialization may run again."; });
             GUILayout.EndHorizontal();
             GUILayout.Label("LLM drafts appear above for editing. Save character profile to keep the draft. Existing saved descriptions are never automatically overwritten.", label);
         }

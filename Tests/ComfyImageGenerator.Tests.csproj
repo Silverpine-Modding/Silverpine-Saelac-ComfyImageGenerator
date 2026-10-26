@@ -5,9 +5,13 @@
     <SilverpineGameDir Condition="'$(SilverpineGameDir)' == ''">$(MSBuildProjectDirectory)\..\..\..</SilverpineGameDir>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Remove="MonoRuntime\**\*.cs" />
     <Compile Include="..\Workflow.cs" Link="Workflow.cs" />
     <Compile Include="..\Detailers.cs" Link="Detailers.cs" />
     <Compile Include="..\ComfyClient.cs" Link="ComfyClient.cs" />
+    <Compile Include="..\PortraitReferences.cs" Link="PortraitReferences.cs" />
+    <Compile Include="..\PortraitUploads.cs" Link="PortraitUploads.cs" />
+    <Compile Include="..\GenerationDiagnostics.cs" Link="GenerationDiagnostics.cs" />
     <Compile Include="..\CharacterProfiles.cs" Link="CharacterProfiles.cs" />
     <Compile Include="..\ScenePrompts.cs" Link="ScenePrompts.cs" />
     <Compile Include="..\SceneSelection.cs" Link="SceneSelection.cs" />

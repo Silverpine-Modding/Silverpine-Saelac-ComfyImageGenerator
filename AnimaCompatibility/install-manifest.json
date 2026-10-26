@@ -1,0 +1,70 @@
+{
+  "version": "1.10.0",
+  "upstream_revision": "6b77cd0c367d76402174ace2be50d3cb6aa77855",
+  "node_files": [
+    {
+      "path": "nodes.py",
+      "url": "https://raw.githubusercontent.com/LuciferTC9527/ComfyUI-Anima_IP-Adapter/6b77cd0c367d76402174ace2be50d3cb6aa77855/nodes.py",
+      "sha256": "521ce9082fa803419851820f4768fb550c0bc0f334c8d1d08199111920fd77be",
+      "size": 49622
+    },
+    {
+      "path": "__init__.py",
+      "url": "https://raw.githubusercontent.com/LuciferTC9527/ComfyUI-Anima_IP-Adapter/6b77cd0c367d76402174ace2be50d3cb6aa77855/__init__.py",
+      "sha256": "59f9d1f1212df67f809c8c00b8c73ebd98b6de68acf0e19332f61e4fef71cb03",
+      "size": 493
+    },
+    {
+      "path": "requirements.txt",
+      "url": "https://raw.githubusercontent.com/LuciferTC9527/ComfyUI-Anima_IP-Adapter/6b77cd0c367d76402174ace2be50d3cb6aa77855/requirements.txt",
+      "sha256": "18b05a793a3f0927619c7bdbc50d24ce91077652ee03fdf77e822881a5b19ed2",
+      "size": 13
+    },
+    {
+      "path": "LICENSE",
+      "url": "https://raw.githubusercontent.com/LuciferTC9527/ComfyUI-Anima_IP-Adapter/6b77cd0c367d76402174ace2be50d3cb6aa77855/LICENSE",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "size": 11357
+    },
+    {
+      "path": "README.md",
+      "url": "https://raw.githubusercontent.com/LuciferTC9527/ComfyUI-Anima_IP-Adapter/6b77cd0c367d76402174ace2be50d3cb6aa77855/README.md",
+      "sha256": "b17289569e6a79ae81e060645ea5377765a54fd375ba400736a6160b14a959b7",
+      "size": 1266
+    }
+  ],
+  "models": [
+    {
+      "path": "models/ipadapter/ip_adapter-Character_Reference-10.safetensors",
+      "url": "https://huggingface.co/LuciferTC/Anima-IP-Adapter/resolve/99e9c351c9f00bdd188b5added0066a80d3b1de6/ip_adapter-Character_Reference-10.safetensors",
+      "sha256": "dc9612cc28b55f00ba39f6169bfe4871130be028a55682ab54dd51360acb8232",
+      "size": 503229576
+    },
+    {
+      "path": "models/siglip2/siglip2-base-patch16-512/config.json",
+      "url": "https://huggingface.co/google/siglip2-base-patch16-512/resolve/a89f5c5093f902bf39d3cd4d81d2c09867f0724b/config.json",
+      "sha256": "a15bc39fbcd92498dea6d5d3cb2b0d8b9ba389d6a3f2b565ea66128a2d141934",
+      "size": 276
+    },
+    {
+      "path": "models/siglip2/siglip2-base-patch16-512/model.safetensors",
+      "url": "https://huggingface.co/google/siglip2-base-patch16-512/resolve/a89f5c5093f902bf39d3cd4d81d2c09867f0724b/model.safetensors",
+      "sha256": "fe0e601c625e69eed8e73500d39e9b6164403fe03db8048e87913c3cefbbb3fe",
+      "size": 1503344520
+    },
+    {
+      "path": "models/siglip2/siglip2-base-patch16-512/preprocessor_config.json",
+      "url": "https://huggingface.co/google/siglip2-base-patch16-512/resolve/a89f5c5093f902bf39d3cd4d81d2c09867f0724b/preprocessor_config.json",
+      "sha256": "63ff380d3e424f93e6fbca5cc8e74eeed882e96fd6be2b7728aed308f3ad1513",
+      "size": 394
+    }
+  ],
+  "weights_license": {
+    "url": "https://huggingface.co/circlestone-labs/Anima/resolve/f973fc41ec7545364ac9776c2440285f43ff2a30/LICENSE.md",
+    "sha256": "ee956174133d7c2cdcf220440c7726187eaf4b50e8e48ee32194353a22164d15",
+    "title": "CircleStone Labs Non-Commercial License v1.2",
+    "author_declared_version": "CircleStone Labs Non-Commercial License v1.0",
+    "author_statement": "https://github.com/LuciferTC9527/ComfyUI-Anima_IP-Adapter/blob/6b77cd0c367d76402174ace2be50d3cb6aa77855/README.md",
+    "note": "Author labels the weights v1.0 but links a document currently headed v1.2. This snapshot documents the referenced terms, not a relicensing or resolution of that inconsistency."
+  }
+}

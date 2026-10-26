@@ -1,6 +1,6 @@
 # Comfy Image Generator
 
-BepInEx 5 plugin for **Silverpine 1.7.3 on Windows**, version **1.8.0**.
+BepInEx 5 plugin for **Silverpine 1.7.3 on Windows**, version **1.10.0**.
 
 [Download the latest release](https://github.com/Silverpine-Modding/Silverpine-Saelac-ComfyImageGenerator/releases/latest)
 
@@ -229,6 +229,85 @@ that directory to make it available in the load list. Profile identities use
 exact character names, with separate keys for players and NPCs; renamed
 characters receive separate entries.
 
+## Optional portrait references (IP-Adapter)
+
+Open **Settings > Portrait references**, select the model family, and **Connect /
+refresh lists**. Choose the adapter files, enable **Use character portrait
+references**, then **Save settings**. Each family has independent settings and
+defaults to disabled. This option is for the built-in workflows.
+
+- **Anima:** one or two selected participants, using `AnimaIPAdapterLoader` and
+  `AnimaIPAdapterApply`. Start at strength **0.2**; **0.2-0.5** worked well in the
+  local NovaFurry tests. Each portrait is encoded separately, then their reference
+  tokens are combined. **Reference image size defaults to 512**, including older
+  configurations. Optional sizes are 224–2048 in multiples of 16; 768 or 1024 may
+  help with detail but use more memory/time and do not guarantee better results.
+  This setting changes reference encoding, not output resolution. The scene prompt
+  controls positions and poses; there are no output regions or attention masks.
+- **Illustrious:** exactly one selected participant, using `IPAdapterModelLoader`,
+  `IPAdapterAdvanced` and `CLIPVisionLoader`. Start at strength **0.5**. Start/end
+  fractions control when the reference affects sampling (default 0 to 1).
+
+In **Character profiles & presets**, select **Current**, **Clothed** or **Nude**
+game art. Current uses the live dialogue portrait, including compatible portrait
+mods. An optional PNG/JPEG **Image override** path takes priority. Absolute paths
+are supported; relative paths resolve inside the plugin folder. Click **Save
+character profile** to apply. These choices are saved in `CharacterProfiles/active.json`
+and named presets alongside the visual description. Presets contain image paths,
+not the image files; include those files separately when sharing a preset.
+
+The existing LLM still turns selected profiles, clothing and scene context into
+the text prompt. It is not sent the portrait images. The adapter receives those
+images separately. References can influence appearance, clothing and style, and
+can still mix traits or miss anatomy; generated content is not automatically
+judged or vetoed. Missing or unreadable artwork falls back to text-only generation
+with a viewer notice. A manual prompt with no selected participants uses text only.
+
+Portraits are encoded on Unity's main thread, bounded to 1536 pixels on their
+longest side, and uploaded as PNGs to **two reusable slots in the server's temp
+folder**. Regeneration overwrites the slots. They are not written to permanent
+ComfyUI input/output folders. Closing the viewer cancels uploads or the queued
+job; uploaded temp references remain until the server clears its temp directory.
+Generated images retain the existing one-image viewer/save/cleanup behavior.
+Detailer crops use the usual model and LoRAs without portrait conditioning.
+
+### Anima server setup
+
+Run the included **[Anima portrait support installer](AnimaCompatibility/README.md)**
+on the ComfyUI server. Windows, macOS and Linux launchers use the same Python helper.
+It downloads pinned original node files from GitHub, applies the modifications,
+and downloads the adapter and SigLIP2 weights from Hugging Face after acknowledgement
+of their terms (about 2.01 GB for a fresh install). Hashes are checked, matching files
+are reused and recognized existing node versions are backed up. Unknown edits are
+left untouched. No Git installation is needed. The separate server support ZIP
+can be transferred to a different computer.
+
+Restart ComfyUI after installing it. The mod checks the compatibility marker and
+second-portrait input before enabling Anima references. The update maps the tested 28-block
+adapter into NovaFurry's 40-block layout and preserves normal LoRAs; it does not
+make it a natively trained 40-block adapter. It replaces one existing custom-node
+file and does not alter ComfyUI core. The mod does not install it automatically.
+
+### Illustrious server setup
+
+Install [ComfyUI_IPAdapter_plus](https://github.com/cubiq/ComfyUI_IPAdapter_plus)
+on the ComfyUI server. For the tested SDXL pairing, download:
+
+- [`ip-adapter_sdxl_vit-h.safetensors`](https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter_sdxl_vit-h.safetensors)
+  into `models/ipadapter/`.
+- [ViT-H vision encoder](https://huggingface.co/h94/IP-Adapter/resolve/main/models/image_encoder/model.safetensors)
+  into `models/clip_vision/`, renamed to `clip-vision_vit-h.safetensors`.
+
+Select those exact filenames in Portrait references. Other SDXL adapters need
+their matching encoder; SD1.5, Anima and FaceID files are not interchangeable.
+This workflow does not use FaceID. Restart after installing the nodes and refresh
+lists after adding models. Missing nodes or selected model files disable activation.
+File listings cannot verify the contents or architecture of renamed weights.
+
+Both families also require core `LoadImage`, `GetImageSize`, `EmptyImage`,
+`InvertMask`, `ImageCompositeMasked` and `ResizeAndPadImage`.
+The settings page lists missing node names. Neither path requires `ImageStitch`.
+
 ## Base positive prompt / reusable styling
 
 In **Settings > Connection, model & LoRAs**, edit **Base positive prompt (always
@@ -342,10 +421,16 @@ Example: `"text": "{{positive}}"`, `"seed": "{{seed}}"`. Numeric placeholders
 become JSON numbers. Prompts are inserted as JSON values, so quotes and
 backslashes remain safe. Unmarked inputs retain their workflow values.
 Put LoRA, cache and detailer nodes directly inside a custom workflow, and
-clear/disable the built-in LoRA/cache/detailer controls to avoid ambiguous settings. Include a
+clear/disable the built-in LoRA/cache/detailer/portrait controls to avoid ambiguous settings. Include a
 PreviewImage or SaveImage output returning PNG or JPEG.
 
 ## Limits and validation
+
+Version 1.9.1 fixes a portrait-upload `NullReferenceException` specific to Unity
+Mono: the multipart form now has a single disposal owner. BepInEx logs include
+exception types and stack traces, including inner exceptions, while omitting
+exception messages that could contain prompts, credentials or endpoint details.
+The generator window still shows the error message.
 
 Dimensions must be multiples of 64, from 256 to 2048. Steps: 1-150. CFG: 0-30.
 LoRA strengths: -10 to 10. One local job at a time. Default overall image-job
@@ -371,6 +456,18 @@ dotnet run --project ./Tests/ComfyImageGenerator.Tests.csproj -c Release "-p:Sil
 
 The test runner requires .NET 9. Game, Unity, BepInEx and Modding Tools assemblies
 are referenced from that installation and are not redistributed in this repository.
+The additional multipart regression checks run inside the game's actual Mono
+runtime and cover both adapter families, successful uploads, cancellation, server
+errors and diagnostic redaction. They use a simulated HTTP handler and submit no
+real image jobs. With the .NET Framework 4.8 targeting pack installed, run:
+
+```powershell
+& "Plugin Development/ComfyImageGenerator/Tests/MonoRuntime/Run-Checks.ps1"
+```
+
+For a standalone source checkout, use `./Tests/MonoRuntime/Run-Checks.ps1
+-GameDirectory "C:\Games\Silverpine"`.
+
 The checks use a mock HTTP handler and the installed game assemblies. They
 cover workflow wiring, LoRA chains/cache, ordered detailer chains, permissive
 LLM parsing and reference fallbacks, removed legacy settings, node and model
@@ -381,6 +478,26 @@ LLM cancellation, job errors/timeouts, submission races, job-ID cancellation,
 and temporary-image cleanup. A real ComfyUI generation and in-game visual
 inspection are still required on the target server/display. Automated checks
 use a simulated ComfyUI API and do not verify GPU output quality or live GUI layout.
+
+The server installer regression tests need only Python's standard library:
+
+```sh
+python -m unittest discover -s Tests/Installer -v
+```
+
+The node tests need a working ComfyUI Python environment. Set `COMFYUI_PATH`
+to the ComfyUI core folder containing `comfy/` and `folder_paths.py`, then run
+`python -m unittest discover -s Tests/AnimaNode -v`. These use tiny tensors and
+do not download models. GitHub Actions runs installer tests on Windows,
+macOS and Linux; that does not establish GPU compatibility on every platform.
+
+## Licensing
+
+The included Anima node modifications retain the upstream Apache 2.0 license,
+attribution and a full modification diff. Adapter weights have separate terms;
+they are downloaded from the author and are not bundled. See
+[Third-party notices](THIRD_PARTY_NOTICES.md) and the server installer guide for
+the documented upstream weight-license version discrepancy.
 
 ## Implementation references
 

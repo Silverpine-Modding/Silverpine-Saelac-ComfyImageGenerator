@@ -14,10 +14,10 @@ public sealed class Plugin : BaseUnityPlugin
 {
     public const string PluginGuid = "Saelac.Silverpine.ComfyImageGenerator";
     public const string PluginName = "Comfy Image Generator";
-    public const string PluginVersion = "1.8.0";
+    public const string PluginVersion = "1.10.0";
     internal static ManualLogSource Log = null!;
     internal static ConfigFile Settings = null!;
-    internal static ConfigEntry<string> Server = null!, BearerToken = null!;
+    internal static ConfigEntry<string> Server = null!, BearerToken = null!, PortraitUploadId = null!;
     internal static ConfigEntry<int> TimeoutMinutes = null!;
     internal static ConfigEntry<ModelFamily> Family = null!;
     internal static ConfigEntry<bool> InitializeProfiles = null!;
@@ -36,6 +36,8 @@ public sealed class Plugin : BaseUnityPlugin
         TemporaryImages.Clear(ImagesDirectory);
         Server = Config.Bind("Connection", "ServerUrl", "http://127.0.0.1:8188", "ComfyUI HTTP(S) base URL. Reverse-proxy subpaths are supported.");
         BearerToken = Config.Bind("Connection", "BearerToken", "", "Optional token for a self-hosted reverse proxy. Stored in this config file; never included in saved workflow metadata.");
+        PortraitUploadId = Config.Bind("Connection", "PortraitUploadId", Guid.NewGuid().ToString("N"), "Private namespace for two reusable portrait upload slots in the server temp folder.");
+        if (!Guid.TryParse(PortraitUploadId.Value, out _)) PortraitUploadId.Value = Guid.NewGuid().ToString("N");
         TimeoutMinutes = Config.Bind("Connection", "GenerationTimeoutMinutes", 20, new ConfigDescription("Overall wait limit, including queue time.", new AcceptableValueRange<int>(1, 120)));
         Family = Config.Bind("Generation", "ModelFamily", ModelFamily.Illustrious, "Selected generation profile.");
         InitializeProfiles = Config.Bind("Characters", "InitializeMissingProfilesWithLlm", true, "On scene generation, attempt to generate missing visual profiles for scene participants. Existing profiles are preserved.");
@@ -57,7 +59,7 @@ public sealed class Plugin : BaseUnityPlugin
 internal sealed class Profile
 {
     internal readonly ModelFamily Family;
-    internal readonly ConfigEntry<string> Model, Encoder, Vae, Sampler, Scheduler, WorkflowFile, LorasJson, DetailersJson, BasePositive, Negative;
+    internal readonly ConfigEntry<string> Model, Encoder, Vae, Sampler, Scheduler, WorkflowFile, LorasJson, DetailersJson, PortraitJson, BasePositive, Negative;
     internal readonly ConfigEntry<int> Width, Height, Steps;
     internal readonly ConfigEntry<double> Cfg;
     internal readonly ConfigEntry<bool> EasyCache;
@@ -79,6 +81,7 @@ internal sealed class Profile
         WorkflowFile = config.Bind(section, "WorkflowFile", "", "Optional API-format workflow template path, absolute or relative to the plugin directory. See README for placeholders.");
         LorasJson = config.Bind(section, "Loras", "[]", "Ordered list of LoRAs, with Name, ModelStrength and ClipStrength. Edit using the generator window.");
         DetailersJson = config.Bind(section, "Detailers", "[]", "Ordered optional Impact Pack detailer passes. Configure detectors, sampling and prompts in the Detailers tab.");
+        PortraitJson = config.Bind(section, "PortraitReferences", Newtonsoft.Json.JsonConvert.SerializeObject(PortraitReferenceSettings.Default(family)), "Optional IP-Adapter portrait workflow. Configure in Portrait references; disabled by default.");
         BasePositive = config.Bind(section, "BasePositivePrompt", "", "Reusable styling prefix prepended to every positive prompt, including regeneration and detailer overrides. Applied directly without an LLM rewrite. Blank disables it.");
         Negative = config.Bind(section, "NegativePrompt", "low quality, blurry, text, watermark", "Negative prompt used for scene generation.");
         EasyCache = config.Bind(section, "EasyCache", false, "Enable the server's native experimental EasyCache node. Model compatibility/quality varies.");

@@ -19,14 +19,18 @@ internal static partial class Program
     private static string DirectoryFor(string name) => Path.Combine(Root, name);
     private static int ImageCount(string path) => Directory.Exists(path) ? Directory.GetFiles(path, "image-*", SearchOption.AllDirectories).Length : 0;
 
-    public static async Task<int> Main()
+    public static async Task<int> Main(string[] args)
     {
+        if (args.Length == 2 && args[0] == "--portrait-live") return await LivePortraits(args[1]);
+        if (args.Length == 2 && args[0] == "--reference-size-live") return await LivePortraits(args[1], referenceSizes: true);
         Directory.CreateDirectory(Root);
         try
         {
             Workflows(); DetailerWorkflows(); SceneUnderstanding(); SceneSelections(); AnimaIdentity(); PromptTolerance(); SaveDialogRequests(); Profiles(); Prompts(); BasePositivePrompts();
             await LlmWaits();
             await ApiSuccess();
+            PortraitWorkflows();
+            await PortraitApi();
             await PermissivePromptApi();
             await CancelQueued();
             await CancelDuringSubmission();
@@ -256,6 +260,11 @@ internal static partial class Program
     {
         JObject graph = Workflow.Build(settings, 42), result = new();
         foreach (JToken node in graph.Values()) result[(string)node["class_type"]!] = new JObject { ["input"] = new JObject { ["required"] = new JObject() } };
+        if (result["AnimaIPAdapterApply"] != null)
+        {
+            result["AnimaIPAdapterApply"]!["description"] = PortraitRequirements.AnimaCompatibility;
+            result["AnimaIPAdapterApply"]!["input"]!["optional"] = new JObject { ["ref_image_2"] = new JArray("IMAGE") };
+        }
         return result;
     }
     private static JObject Done(string id, bool error = false) => new()
@@ -283,11 +292,29 @@ internal static partial class Program
         internal JObject Nodes = Info(Settings());
         internal string ViewQuery = "";
         internal JObject? SubmittedGraph;
+        internal int Uploads;
+        internal bool BadUpload;
+        internal Action? OnUpload;
+        internal readonly List<string> UploadedPaths = new();
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancel)
         {
             string route = request.RequestUri!.AbsolutePath.Replace("/proxy/", "");
             Routes.Add(request.Method + " " + route);
             if (route == "object_info") return Json(Nodes);
+            if (route == "upload/image")
+            {
+                var form = (MultipartFormDataContent)request.Content!;
+                var parts = form.ToDictionary(p => p.Headers.ContentDisposition!.Name!.Trim('"'));
+                Check(await parts["type"].ReadAsStringAsync(cancel) == "temp", "portraits go to server temp");
+                Check(await parts["overwrite"].ReadAsStringAsync(cancel) == "true", "reusable portrait slots overwrite");
+                Check(parts["image"].Headers.ContentType!.MediaType == "image/png", "portrait content type");
+                Check((await parts["image"].ReadAsByteArrayAsync(cancel)).SequenceEqual(Png), "portrait bytes preserved");
+                string folder = await parts["subfolder"].ReadAsStringAsync(cancel);
+                string name = parts["image"].Headers.ContentDisposition!.FileName!.Trim('"');
+                Uploads++; UploadedPaths.Add(folder + "/" + name);
+                OnUpload?.Invoke(); cancel.ThrowIfCancellationRequested();
+                return Json(new JObject { ["name"] = BadUpload ? "../../wrong.png" : name, ["subfolder"] = folder, ["type"] = "temp" });
+            }
             if (route.StartsWith("api/jobs/") && route.EndsWith("/cancel"))
             {
                 string target = route.Split('/')[2];

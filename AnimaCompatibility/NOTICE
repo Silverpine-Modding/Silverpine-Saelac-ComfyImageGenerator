@@ -1,0 +1,23 @@
+ComfyUI-Anima_IP-Adapter
+Upstream author: LuciferTC9527
+Upstream: https://github.com/LuciferTC9527/ComfyUI-Anima_IP-Adapter
+Commit: 6b77cd0c367d76402174ace2be50d3cb6aa77855
+Node code license: Apache License 2.0 (see LICENSE)
+
+Modified for Silverpine Comfy Image Generator by Saelac and ChatGPT, 2026-10-26:
+28-to-40 block insertion mapping; native LoRA patch composition; capability marker;
+independent portrait encoding and matching null-token sequences; ComfyUI compute-device selection.
+See compatibility.patch for the complete changes to nodes.py.
+Upstream copyright, license and attribution notices are retained.
+
+Downloaded separately, not included in this distribution:
+- LuciferTC/Anima-IP-Adapter character-reference weights:
+  https://huggingface.co/LuciferTC/Anima-IP-Adapter
+  The author labels the license CircleStone Labs Non-Commercial v1.0 but links
+  a document headed v1.2. WEIGHTS-LICENSE.reference.txt and install-manifest.json
+  record the linked terms without resolving that mismatch or relicensing weights.
+- Google SigLIP2 base patch16 512:
+  https://huggingface.co/google/siglip2-base-patch16-512
+  Google's model card identifies Apache License 2.0; full text is in LICENSE.
+  Credits: Google; Tschannen et al., SigLIP 2 (2025),
+  https://arxiv.org/abs/2502.14786
