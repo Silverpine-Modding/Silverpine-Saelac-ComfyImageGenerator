@@ -24,6 +24,7 @@ public sealed class DetailerSetting
     public bool ForceInpaint { get; set; } = true;
     public string Positive { get; set; } = "";
     public string Negative { get; set; } = "";
+    public string Wildcard { get; set; } = "";
 
     public void Validate()
     {
@@ -38,7 +39,7 @@ public sealed class DetailerSetting
             throw new ArgumentException(prefix + "detector threshold must be 0-1, crop factor 1-10, and dilation -512 to 512.");
         if (Feather < 0 || Feather > 100 || Cycles < 1 || Cycles > 10)
             throw new ArgumentException(prefix + "feather must be 0-100 and cycles 1-10.");
-        if (Positive == null || Negative == null || Positive.Length > 32000 || Negative.Length > 32000)
+        if (Positive == null || Negative == null || Wildcard == null || Positive.Length > 32000 || Negative.Length > 32000 || Wildcard.Length > 32000)
             throw new ArgumentException(prefix + "prompts must be text no longer than 32,000 characters.");
     }
 
@@ -77,7 +78,9 @@ public static partial class Workflow
                 ["scheduler"] = string.IsNullOrWhiteSpace(pass.Scheduler) ? settings.Scheduler : pass.Scheduler,
                 ["guide_size"] = pass.GuideSize, ["guide_size_for"] = true, ["max_size"] = pass.MaxSize,
                 ["feather"] = pass.Feather, ["noise_mask"] = pass.NoiseMask, ["force_inpaint"] = pass.ForceInpaint,
-                ["cycle"] = pass.Cycles, ["wildcard"] = ""
+                // Impact Pack owns wildcard expansion, region ordering and label selection.
+                // Preserve directives at the start; a style prefix would break [CONCAT]/[LAB].
+                ["cycle"] = pass.Cycles, ["wildcard"] = pass.Wildcard
             };
             inputs["bbox_threshold"] = pass.DetectionThreshold; inputs["bbox_dilation"] = pass.Dilation;
             inputs["bbox_crop_factor"] = pass.CropFactor; inputs["bbox_detector"] = Link(detectorId); inputs["drop_size"] = 10;

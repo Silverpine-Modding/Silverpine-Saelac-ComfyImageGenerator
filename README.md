@@ -1,6 +1,6 @@
 # Comfy Image Generator
 
-BepInEx 5 plugin for **Silverpine 1.7.3 on Windows**, version **1.10.0**.
+BepInEx 5 plugin for **Silverpine 1.7.3 on Windows**, version **1.10.1**.
 
 [Download the latest release](https://github.com/Silverpine-Modding/Silverpine-Saelac-ComfyImageGenerator/releases/latest)
 
@@ -366,6 +366,51 @@ positive override. Use a compatible face, hand or other detector from the list.
 Segmentation detectors also supply their segmentation masks. SAM refinement and
 other detailer implementations can be configured in a custom API workflow.
 
+Each pass also has a **Wildcard** box passed unchanged to Impact Pack's
+`FaceDetailer.wildcard`. Wildcard, positive override and negative override boxes
+have independent vertical scrolling and dark backgrounds. Save settings to keep
+their contents; older settings default to an empty wildcard.
+
+A blank wildcard keeps the pass's positive conditioning. A nonempty wildcard
+normally replaces it, including the base style. Start with `[CONCAT]` to append
+to the inherited scene or styled positive override instead. Negative conditioning
+is unchanged. Wildcard files (`__name__`), choices (`{a|b}`) and inline LoRAs use
+Impact Pack's server-side implementation and installed files.
+
+For separate detected regions, for example:
+
+```text
+[CONCAT][ASC] clear amber eyes [SEP] clear blue eyes
+```
+
+`[ASC]` orders detections by left edge, then top edge; `[DSC]` reverses that.
+`[ASC-SIZE]` / `[DSC-SIZE]` sort by area; `[RND]` shuffles the prompt choices.
+`[SEP]` separates prompts assigned to successive regions. This orders detailing
+of existing detections; it does not place characters in the base image or identify
+them by name. Impact Pack also handles its native seed and skip/stop directives.
+
+For label-specific detailing, use the exact labels your detector outputs:
+
+```text
+[CONCAT][LAB]
+[ALL] fine texture,
+[face] clear eyes, detailed muzzle
+[hand] well-defined fingers
+```
+
+These are example labels, not a list guaranteed by every detector. Matching is
+case-sensitive. `[ALL]` prefixes each selected label prompt; include a comma or
+other separator at its end. Without `[ALL]`, unmatched labels keep the pass's
+positive conditioning. `[LAB]` chooses prompts for detections, not which labels
+the detector scans. Multi-class SEGM models retain their class labels through
+the normal detector/mask connections.
+
+Directives must start at the first character. Keep combined prefixes adjacent,
+such as `[CONCAT][LAB]` or `[CONCAT][ASC]`, without whitespace between them.
+No extra nodes or modifications to Impact Pack are required. See the
+[Impact Pack wildcard guide](https://github.com/ltdrdata/ComfyUI-extension-tutorials/blob/Main/ComfyUI-Impact-Pack/tutorial/ImpactWildcard.md)
+for the syntax supported by your installed version.
+
 Passes use the selected base model, encoder, VAE, LoRAs and resolved seed.
 EasyCache is applied only to base sampling; detailer crops use the model without
 that cache patch. Settings, order and enable states are saved separately for
@@ -478,6 +523,17 @@ LLM cancellation, job errors/timeouts, submission races, job-ID cancellation,
 and temporary-image cleanup. A real ComfyUI generation and in-game visual
 inspection are still required on the target server/display. Automated checks
 use a simulated ComfyUI API and do not verify GPU output quality or live GUI layout.
+
+Optional detailer integration checks run against your installed, unmodified
+Impact Pack using ComfyUI's Python environment:
+
+```sh
+python Tests/ImpactRuntime/test_detailer_wildcards.py --comfy-dir /path/to/ComfyUI --impact-dir /path/to/custom_nodes/ComfyUI-Impact-Pack
+```
+
+These use synthetic detections and a sampling stub on CPU. They verify native
+label matching through segmentation masks, `[CONCAT]`, ordered region prompts,
+skipping and blank fallback without loading checkpoints or contacting the server.
 
 The server installer regression tests need only Python's standard library:
 

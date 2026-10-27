@@ -1,4 +1,26 @@
-# Comfy Image Generator 1.10.0
+# Comfy Image Generator 1.10.1
+
+- Each detailer now has a native Impact Pack wildcard box supporting per-region
+  prompts, `[CONCAT]`, and `[LAB]` / `[ALL]` detector-label prompts, along with
+  server-side wildcard files, choices and inline LoRAs.
+- Positive override, negative override and wildcard editors scroll independently
+  within dark, fixed-height boxes. Each pass includes expandable syntax help.
+- Wildcard text is saved per pass and model family and passed through unchanged.
+  Existing settings retain their overrides and start with an empty wildcard.
+- Label prompts use the detector's exact class names, including segmentation
+  labels; they do not identify characters by name.
+
+Replace the plugin DLL and **restart Silverpine**. This update makes no changes
+to ComfyUI nodes and requires no ComfyUI restart or Anima installer update from
+1.10.0. The existing Anima support package and its licensing remain unchanged.
+
+Validation: release build has zero warnings/errors; all 404 mod assertions and
+five CPU integration tests against the installed, unmodified Impact Pack pass.
+The integration tests use synthetic detections and stub diffusion sampling;
+they verify prompt routing, not generated image quality. In-game layout still
+needs visual verification after restarting Silverpine.
+
+## Previous release: 1.10.0
 
 Anima portrait references now encode each selected character separately instead
 of placing both portraits on a shared left/right sheet. The scene prompt controls
@@ -65,7 +87,7 @@ Illustrious uses its existing ComfyUI_IPAdapter_plus / SDXL adapter / matching
 vision encoder setup. The Anima helper does not install Illustrious models, game
 checkpoints, style LoRAs, the Anima text encoder or VAE.
 
-## Validation and limits
+## 1.10.0 validation and limits
 
 - Release build: zero warnings/errors; 367 mod assertions and 28 Unity Mono
   assertions pass.

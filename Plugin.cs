@@ -14,7 +14,7 @@ public sealed class Plugin : BaseUnityPlugin
 {
     public const string PluginGuid = "Saelac.Silverpine.ComfyImageGenerator";
     public const string PluginName = "Comfy Image Generator";
-    public const string PluginVersion = "1.10.0";
+    public const string PluginVersion = "1.10.1";
     internal static ManualLogSource Log = null!;
     internal static ConfigFile Settings = null!;
     internal static ConfigEntry<string> Server = null!, BearerToken = null!, PortraitUploadId = null!;
@@ -80,7 +80,7 @@ internal sealed class Profile
         Scheduler = config.Bind(section, "Scheduler", anima ? "simple" : "normal", "ComfyUI scheduler name.");
         WorkflowFile = config.Bind(section, "WorkflowFile", "", "Optional API-format workflow template path, absolute or relative to the plugin directory. See README for placeholders.");
         LorasJson = config.Bind(section, "Loras", "[]", "Ordered list of LoRAs, with Name, ModelStrength and ClipStrength. Edit using the generator window.");
-        DetailersJson = config.Bind(section, "Detailers", "[]", "Ordered optional Impact Pack detailer passes. Configure detectors, sampling and prompts in the Detailers tab.");
+        DetailersJson = config.Bind(section, "Detailers", "[]", "Ordered optional Impact Pack detailer passes. Configure detectors, sampling, prompt overrides and native wildcards in the Detailers tab.");
         PortraitJson = config.Bind(section, "PortraitReferences", Newtonsoft.Json.JsonConvert.SerializeObject(PortraitReferenceSettings.Default(family)), "Optional IP-Adapter portrait workflow. Configure in Portrait references; disabled by default.");
         BasePositive = config.Bind(section, "BasePositivePrompt", "", "Reusable styling prefix prepended to every positive prompt, including regeneration and detailer overrides. Applied directly without an LLM rewrite. Blank disables it.");
         Negative = config.Bind(section, "NegativePrompt", "low quality, blurry, text, watermark", "Negative prompt used for scene generation.");

@@ -26,7 +26,8 @@ internal static partial class Program
         Directory.CreateDirectory(Root);
         try
         {
-            Workflows(); DetailerWorkflows(); SceneUnderstanding(); SceneSelections(); AnimaIdentity(); PromptTolerance(); SaveDialogRequests(); Profiles(); Prompts(); BasePositivePrompts();
+            Workflows(); DetailerWorkflows(); DetailerWildcards(); SceneUnderstanding(); SceneSelections(); AnimaIdentity(); PromptTolerance(); SaveDialogRequests(); Profiles(); Prompts(); BasePositivePrompts();
+            await DetailerWildcardApi();
             await LlmWaits();
             await ApiSuccess();
             PortraitWorkflows();

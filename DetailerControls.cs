@@ -14,8 +14,10 @@ internal sealed partial class GeneratorWindow
     {
         internal bool Enabled, NoiseMask, ForceInpaint;
         internal string Name, Detector, Steps, Cfg, Denoise, Sampler, Scheduler, GuideSize, MaxSize,
-            DetectionThreshold, Dilation, CropFactor, Feather, Cycles, Positive, Negative;
+            DetectionThreshold, Dilation, CropFactor, Feather, Cycles, Positive, Negative, Wildcard;
         internal bool Expanded = true;
+        internal bool ShowWildcardHelp;
+        internal Vector2 PositiveScroll, NegativeScroll, WildcardScroll;
 
         internal DetailerDraft(DetailerSetting s)
         {
@@ -24,7 +26,7 @@ internal sealed partial class GeneratorWindow
             Sampler = s.Sampler; Scheduler = s.Scheduler; GuideSize = s.GuideSize.ToString(Inv); MaxSize = s.MaxSize.ToString(Inv);
             DetectionThreshold = s.DetectionThreshold.ToString(Inv); Dilation = s.Dilation.ToString(Inv); CropFactor = s.CropFactor.ToString(Inv);
             Feather = s.Feather.ToString(Inv); Cycles = s.Cycles.ToString(Inv); NoiseMask = s.NoiseMask; ForceInpaint = s.ForceInpaint;
-            Positive = s.Positive; Negative = s.Negative;
+            Positive = s.Positive; Negative = s.Negative; Wildcard = s.Wildcard;
         }
 
         internal DetailerSetting Read() => new()
@@ -34,7 +36,7 @@ internal sealed partial class GeneratorWindow
             GuideSize = Int(GuideSize, Name + " guide size"), MaxSize = Int(MaxSize, Name + " max size"),
             DetectionThreshold = Number(DetectionThreshold, Name + " detection threshold"), Dilation = Int(Dilation, Name + " dilation"),
             CropFactor = Number(CropFactor, Name + " crop factor"), Feather = Int(Feather, Name + " feather"), Cycles = Int(Cycles, Name + " cycles"),
-            NoiseMask = NoiseMask, ForceInpaint = ForceInpaint, Positive = Positive, Negative = Negative
+            NoiseMask = NoiseMask, ForceInpaint = ForceInpaint, Positive = Positive, Negative = Negative, Wildcard = Wildcard
         };
     }
 
@@ -131,10 +133,22 @@ internal sealed partial class GeneratorWindow
             d.NoiseMask = GUILayout.Toggle(d.NoiseMask, " Limit noise to detected mask", GUILayout.Width(400));
             d.ForceInpaint = GUILayout.Toggle(d.ForceInpaint, " Force inpaint even without upscaling", GUILayout.Width(500));
             GUILayout.EndHorizontal();
-            GUILayout.Label("Positive override (blank inherits the scene prompt; base style is always added)", label);
-            d.Positive = GUILayout.TextArea(d.Positive, 32000, field, GUILayout.MinHeight(80));
+            GUILayout.Label("Positive override (blank inherits the scene prompt; includes base style unless replaced by the wildcard)", label);
+            d.Positive = DetailerPrompt(d.Positive, ref d.PositiveScroll, 100);
             GUILayout.Label("Negative prompt override (blank inherits the base negative prompt)", label);
-            d.Negative = GUILayout.TextArea(d.Negative, 32000, field, GUILayout.MinHeight(60));
+            d.Negative = DetailerPrompt(d.Negative, ref d.NegativeScroll, 80);
+            GUILayout.Label("Wildcard (Impact Pack syntax; blank keeps the positive prompt)", label);
+            d.Wildcard = DetailerPrompt(d.Wildcard, ref d.WildcardScroll, 160);
+            GUILayout.Label("A nonempty wildcard replaces positive conditioning. Start with [CONCAT] to add to the inherited scene or positive override instead. Negative conditioning is unchanged.", label);
+            if (GUILayout.Button(d.ShowWildcardHelp ? "Hide wildcard syntax help" : "Show wildcard syntax help", button, GUILayout.Width(360), GUILayout.Height(34)))
+                d.ShowWildcardHelp = !d.ShowWildcardHelp;
+            if (d.ShowWildcardHelp)
+            {
+                GUILayout.Label("Per-region example: [CONCAT][ASC] clear amber eyes [SEP] clear blue eyes\n[ASC] orders regions left to right, then top to bottom; [DSC] reverses that order. [ASC-SIZE] / [DSC-SIZE] sort by area; [RND] shuffles prompts. Separate region prompts with [SEP].", label);
+                GUILayout.Label("Label example (use labels your detector actually outputs):\n[CONCAT][LAB]\n[ALL] fine texture,\n[face] clear eyes, detailed muzzle\n[hand] well-defined fingers", label);
+                GUILayout.Label("[LAB] selects prompts by the detector's exact, case-sensitive labels, including SEGM labels. [ALL] prefixes every label prompt. Without [ALL], unmatched labels keep the positive prompt. It does not identify characters by name or restrict which labels are detected.", label);
+                GUILayout.Label("Put directives at the very start, with no spaces or line break between [CONCAT] and [LAB] or [ASC]. Wildcard files (__name__), choices ({a|b}) and inline LoRAs are handled by Impact Pack on your ComfyUI server. This text is passed through unchanged.", label);
+            }
         }
         // Mutate only after drawing all rows to keep controls and callbacks attached to the correct pass.
         if (remove >= 0) detailers.RemoveAt(remove);
@@ -154,4 +168,7 @@ internal sealed partial class GeneratorWindow
         GUI.enabled = controlsEnabled;
         if (GUILayout.Button("Save settings", button, GUILayout.Height(38))) Try(SaveSettings);
     }
+
+    private string DetailerPrompt(string text, ref Vector2 position, float height) =>
+        ScrollablePrompt(GUILayoutUtility.GetRect(0, height, GUILayout.ExpandWidth(true)), text, ref position);
 }
