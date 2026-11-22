@@ -1,6 +1,156 @@
 # Comfy Image Generator
 
-BepInEx 5 plugin for **Silverpine 1.7.3 on Windows**, version **1.10.1**.
+BepInEx 5 plugin for **Silverpine 1.7.3 on Windows**, version **1.11.0-beta.6**.
+
+This is an opt-in **beta** for local vision LLM prompting. Existing settings keep
+using the game's LLM until the new option is enabled. Keep your previous DLL for
+rollback; character profiles, presets and generation settings retain their formats.
+
+## Local vision LLM beta
+
+Open **Settings → Vision LLM (beta)**, enable the option, choose a provider,
+enter its server URL/IP and port, and use **Connect / choose model or config**.
+Install the vision model in that server first. Save settings, then generate a new
+scene from a conversation. No additional ComfyUI nodes are required.
+
+| Server | Default address | Requirements and model lifecycle |
+| --- | --- | --- |
+| Ollama | `http://127.0.0.1:11434` | Installed image-capable model. Loads on chat requests; explicit `keep_alive: 0` unload followed by `/api/ps` verification. |
+| LM Studio | `http://127.0.0.1:1234` | Version 0.4.0+ with native `/api/v1/chat` and `/api/v1/models` load/unload APIs. Loads or reuses the selected model, then unloads its instances and checks the model list. Older inference-only servers are unsupported for this lifecycle. |
+| KoboldCPP | `http://127.0.0.1:5001` | Enable **Model Administration**, set its config directory and admin password. Choose a `.kcpps` vision config with its matching MMProj, or `initial_model` if started with those files. Uses admin reload/unload and waits for reported worker state. |
+
+The list button only reads models/configs; generating a scene performs the model
+switch. KoboldCPP admin operations restart its internal worker while keeping its
+supervisor/server available. Its config controls context length; the mod's
+context setting applies to Ollama and newly loaded LM Studio instances. The
+timeout covers each model load or inference request. Temperature and output
+token limit are configurable. The output limit applies to **each portrait request
+and the final scene request**; there is no separate hidden portrait cap. LM Studio
+uses native chat with `reasoning: off` when the model advertises that option,
+and consumes only final message text. Models without that option retain their
+server default. Chat persistence is disabled for these requests. LM Studio's
+native temperature range is 0–1; the other providers allow 0–2. Tokens/API passwords stay in the local BepInEx
+config and are excluded from generation/workflow metadata and diagnostic logs.
+
+An empty answer reports available output/reasoning token counts and whether the
+output limit was reached. Reasoning is never substituted for a description or
+scene prompt. For NSFWVision v5 Qwen3.5-9B, beta.1's 600-token portrait cap could
+be exhausted entirely by reasoning. Beta.2 was tested against LM Studio with
+that model: both portrait descriptions and the final Anima scene prompt returned
+text with reasoning disabled, as did a separate single-character Illustrious
+test. Both runs confirmed model unloading. These tests verify responses and
+memory lifecycle, not prompt accuracy or image quality; prompts remain editable.
+
+Each selected portrait is sent in its own request with that character's exact
+ID, name and text reference. A final text request combines those observations
+with dialogue, environment, current clothing and scene guidance. Anima retains
+the two-person limit and prose format; Illustrious retains one person and booru
+tags. Explicit saved visual profiles win over conflicting portrait details, and
+live clothing wins over portrait outfits. Instructions avoid copying the
+portrait's pose/background or inventing anatomy outside the crop. This improves
+grounding but cannot guarantee correct anatomy or prevent feature blending.
+
+Vision scene prompting asks for **one combined appearance and action description
+per character**, merging compatible portrait details into the saved profile's
+facts. For Anima, name and species lead into basic appearance, then current action
+and clothing. Vision uses cast
+counts, character blocks and scenery, without a separate composition overview
+that can repeat appearances. That complete paragraph/tag list is used directly,
+without prepending a second copy of the saved physical description or derived
+identity tags. Instructions prioritize the explicit profile when references
+conflict, and live clothing over the portrait outfit. Exact duplicate Illustrious tags are collapsed within
+each character's block. Missing character entries still use profile/clothing
+references, and plain-text replies remain usable. The game's LLM path retains
+its existing profile-anchor behavior. Model-written repetition can still be
+corrected in Regenerate / edit prompt; existing prompts are not rewritten.
+
+Anima vision prompting and portrait observations request short factual sentences
+instead of a minimum word count or a long chain of appearance clauses. Overall
+coat colors come before localized colors; a white neck ruff stays attached to
+the neck rather than describing the entire coat. Unspecified color placement
+is not invented. Keep descriptive detail across multiple sentences, with one
+character's traits in its own paragraph. This follows the model card's guidance
+to name each character and describe its appearance, while retaining at least two
+sentences for a natural-language scene ([Anima prompting guidance](https://huggingface.co/circlestone-labs/Anima#natural-language-prompting-tips)).
+The vision LLM returns identity, body colors, local features, action and clothing
+in separate fields. Overall body color names, covering (fur/scales/etc.) and
+texture are supplied as data and formatted into a named character sentence before
+local features. The mod joins the remaining sentences in that order. Older string
+responses remain usable. The short-sentence/color-scoping instructions are this mod's approach to reducing
+ambiguity, not a model guarantee or a required Anima sentence length. Quality and
+score tags remain the user's base positive prompt; the vision LLM is asked not to
+add them. Illustrious scene output retains booru tags. No automatic truncation,
+length rejection or rewriting of saved profiles/manual prompts is introduced.
+
+Illustrious vision output requests **individual tags in lists** for identity,
+pose, appearance and clothing, plus a separate scenery list. Each item should
+describe one concept, usually in 1–4 words, with about 20–30 useful character tags
+rather than an exhaustive caption. Local colors stay attached to their features;
+garments and accessories become separate tags. Physical features are supplied as
+concepts with modifiers; garments have separate color/material/pattern fields and
+a list of detail tags, so sleeves or necklines do not become one long outfit tag.
+The mod joins those lists with
+commas, normalizes lowercase/spaces and removes exact duplicates. Quality/score
+tags remain in the base positive prompt. These are LLM instructions, not hard
+limits: older text replies, partial lists and long/custom tags remain usable and
+editable. Anima keeps its separate sentence format.
+
+Each LLM character entry now requests a separate **species** field. Instructions
+prioritize the explicit customized profile, preserving stated subtypes/hybrids,
+and use the game's species only if the profile does not specify one. Generic
+words such as “anthro” or “furry” are not substitutes for a known species. If the
+returned paragraph/tags omit the supplied species, the mod adds a short species
+label beside the character name for Anima, or a species tag for Illustrious.
+It does not add that label when the species wording is already present. Older
+responses without the field and unknown species remain usable without guessing
+or rejecting a generation. Both the game and vision LLM paths support this field.
+
+Portraits come from the existing **Character profiles** source/file controls.
+IP-Adapter is independent: leave it disabled to use portraits only for prompting,
+or enable both. With first-use initialization enabled, missing profiles are saved
+from vision drafts; existing profiles are never automatically replaced. The
+manual **Ask LLM for profile draft** button still uses the game's LLM. Missing
+portraits fall back to text references without rejecting the scene. Observations
+are temporary; this beta rereads portraits for each new scene. **Regenerate**
+skips the LLM and preserves the editable prompt.
+
+The memory sequence is mandatory in vision mode:
+
+1. Wait for ComfyUI's queue to be idle, unload its models and clear its execution cache.
+2. Load the vision LLM, read portraits and finish the scene prompt.
+3. Explicitly unload the selected LLM and check the server's loaded-model state.
+4. Submit the image job, run all adapter/detailer passes and download the result.
+5. Release ComfyUI models/cache again. Viewing/saving the downloaded image needs no loaded models.
+
+Cancellation and failures use a separate, bounded cleanup attempt (up to two
+minutes). If Close occurs during a model load handshake, cleanup waits for its
+bounded response to identify/stop the loaded instance; no image is then submitted.
+An unconfirmed LLM unload prevents image submission and reports an operational
+error. ComfyUI cleanup failure after a successful generation keeps the image and
+shows a warning. This does not add prompt-content or anatomy vetoes.
+
+`/free` in ComfyUI only acknowledges a request. On CUDA-style backends the mod
+waits for an idle queue and three samples of allocator reservations at or below
+64 MiB. CPU/MPS and other backends lacking separate allocator counters report
+acknowledgement with a notice that memory release could not be measured. Driver,
+Unity and other application memory is outside this measurement. Plugins that
+retain GPU tensors outside ComfyUI's model/cache manager may prevent confirmation.
+
+**Release ComfyUI models/cache after every image** defaults on in this beta and
+also works with the game's LLM. It can be disabled for that path; vision mode
+always cleans up. Reloading weights adds latency. ComfyUI cleanup affects its
+server cache and waits for other queued work. Other Ollama/LM Studio models stay
+loaded; KoboldCPP switching affects its whole worker. Use a dedicated endpoint
+if the game's dialogue model must remain available. The mod does not download
+models, start servers, stop application processes, or delete weights.
+
+API references: [Ollama vision](https://docs.ollama.com/capabilities/vision),
+[Ollama running models](https://docs.ollama.com/api/ps),
+[LM Studio model management](https://lmstudio.ai/docs/developer/rest),
+[LM Studio native chat](https://lmstudio.ai/docs/developer/rest/chat),
+[KoboldCPP admin mode](https://koboldcpp.net/docs/settings/admin-mode/).
+
+## Scene generation
 
 [Download the latest release](https://github.com/Silverpine-Modding/Silverpine-Saelac-ComfyImageGenerator/releases/latest)
 
@@ -16,20 +166,48 @@ Silverpine's configured LLM reads a snapshot of the current dialogue,
 environment and character profiles, then writes an image prompt for ComfyUI:
 
 - **Illustrious:** comma-separated booru-style visual tags.
-- **Anima:** descriptive English prose with character placement and interaction.
+- **Anima:** supported cast-count tags followed by descriptive English prose with
+  character placement and interaction.
 
-The LLM is instructed to write each visible character in a separate paragraph,
+Structured prompts start with the selected cast count and a short description of
+the main action. Each visible character then has a separate paragraph,
 followed by a separate environment paragraph. Illustrious uses comma-separated
 tags within each paragraph; Anima uses sentences. Blank lines are preserved
 through cleanup, editing and the ComfyUI API. This keeps descriptions organized;
 the image model can still mix traits or misrender anatomy.
+
+For two-character Anima scenes, the opening establishes exactly two distinct
+characters and names who is doing what. The LLM is instructed to use consistent
+names and poses, attach each feature and garment to its owner, and avoid a shared
+list of both characters' appearances. Each person's description receives similar
+space; the environment comes last. Placement follows the scene rather than the
+selection/reference order, so either person can sit, stand, lie down or change
+sides. Close contact and shared furniture remain supported. This is prompt
+organization, not regional masking or a guarantee against blending.
+
+Player sex/pronouns and each NPC's effective game sex/pronouns are supplied as
+separate hints. The LLM resolves explicit gender from the visual profile first,
+with game sex as a fallback. The mod counts only matched selected entries:
+`1boy, 1girl`, `2boys`, `2girls`, or `1other` / `2others` for explicitly reported
+intersex, nonbinary or other categories. Unknown gender contributes no gender
+tag; the total selected character count is still stated. Pronouns alone do not
+determine anatomy. These model count tags do not change a character's established
+age. Older responses without gender metadata fall back to explicit game sex.
+Anima supports mixing tags with prose; see its
+[prompting guide](https://huggingface.co/circlestone-labs/Anima#prompting).
+
+The reusable base positive prefix still comes first. Keep it concise to leave
+the cast and main action near the beginning. Prompts are assembled as styling,
+cast count and composition, individual character paragraphs, then environment.
+No automatic weighting, fixed left/right regions, or prompt-content rejection
+is introduced. Plain-text LLM replies and manual regeneration remain untouched.
 
 The plugin does not add image instructions to the ongoing NPC conversation or
 modify its history. It makes separate LLM requests using the game's existing
 connection, including compatible endpoint plugins.
 
 Scene references bind each exact character name and profile key to its physical
-description, a fallback game species hint, and its current clothing state. The
+description, fallback game species/sex hints, pronouns, and its current clothing state. The
 LLM is instructed to lead with species and supported anatomy instead of turning
 an anthro character into a generic human. Saved visual profiles retain priority
 over game species hints when you intentionally customize a character.

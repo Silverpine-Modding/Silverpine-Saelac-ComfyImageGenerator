@@ -28,6 +28,9 @@ public sealed class GenerationSettings
     // Runtime prompt ownership, not a saved profile or ComfyUI node input.
     public List<string> SceneCharacterKeys { get; set; } = new();
     public string PromptNotice { get; set; } = "";
+    [Newtonsoft.Json.JsonIgnore] public VisionSettings Vision { get; set; } = new();
+    public bool ReleaseComfyMemory { get; set; }
+    [Newtonsoft.Json.JsonIgnore] public string CleanupNotice { get; set; } = "";
     public int Width { get; set; } = 1024;
     public int Height { get; set; } = 1024;
     public int Steps { get; set; } = 30;

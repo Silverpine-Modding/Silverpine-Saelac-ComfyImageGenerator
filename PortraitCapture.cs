@@ -9,9 +9,9 @@ internal static class PortraitCapture
 {
     private static readonly System.Reflection.FieldInfo? NpcClothedSprite = HarmonyLib.AccessTools.Field(typeof(NeuralNPC), "dialogSprite");
     // Called only on Unity's main thread. The HTTP worker receives PNG bytes, never Unity objects.
-    internal static void Capture(GenerationSettings settings)
+    internal static void Capture(GenerationSettings settings, bool includeVision = true)
     {
-        if (!settings.PortraitSettings.Enabled) return;
+        if (!settings.PortraitSettings.Enabled && !(includeVision && settings.Vision.Enabled)) return;
         settings.Portraits.Clear();
         settings.PortraitUploadNamespace = Plugin.PortraitUploadId.Value;
         if (settings.SceneCharacterKeys.Count == 0)
@@ -44,7 +44,7 @@ internal static class PortraitCapture
                 return;
             }
         }
-        settings.PortraitNotice = "Used " + settings.Portraits.Count + " selected character portrait reference(s).";
+        settings.PortraitNotice = "Captured " + settings.Portraits.Count + " selected character portrait reference(s).";
     }
 
     private static Sprite? FindSprite(string key, PortraitSource source)

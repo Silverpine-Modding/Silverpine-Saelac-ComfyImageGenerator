@@ -11,6 +11,7 @@ namespace SilverpineMods.ComfyImageGenerator;
 internal static class SceneCapture
 {
     private static readonly System.Reflection.MethodInfo? ExposureMethod = HarmonyLib.AccessTools.Method(typeof(Player), "IsExposed", new[] { typeof(EquipmentSlotType) });
+    private static readonly System.Reflection.MethodInfo? NpcSexMethod = HarmonyLib.AccessTools.Method(typeof(NeuralNPC), "GetFinalSex", Type.EmptyTypes);
     internal static List<SceneCharacter> AvailableCharacters()
     {
         var characters = new List<SceneCharacter>();
@@ -29,6 +30,7 @@ internal static class SceneCapture
     {
         Key = CharacterProfileStore.Key(npc.GetFinalName(), false), Name = npc.GetFinalName(),
         Description = npc.GetFinalCharacterDescription(isPrivate: false) ?? "", Species = npc.species ?? "",
+        Sex = NpcSexHint(npc), Pronouns = PronounHint(npc.Pronouns),
         Clothing = new SceneClothing { State = npc.isNude ? "nude" : "clothed", EquipmentKnown = false,
             VisibleDetails = npc.GetNPCVisibleObjectDescription() ?? "" }
     };
@@ -36,7 +38,7 @@ internal static class SceneCapture
     private static SceneCharacter FromPlayer(Player player)
     {
         var character = new SceneCharacter { Key = CharacterProfileStore.Key(player.playerName, true), Name = player.playerName,
-            Description = player.characterDescription ?? "" };
+            Description = player.characterDescription ?? "", Sex = player.sex.ToString().ToLowerInvariant(), Pronouns = PronounHint(player.Pronouns) };
         if (player.equippedItems == null) return character; // No live inventory yet: do not infer nudity.
         bool? upperExposed = ReadExposure(player, EquipmentSlotType.Chest), lowerExposed = ReadExposure(player, EquipmentSlotType.Legs);
         character.Clothing = new SceneClothing
@@ -56,6 +58,21 @@ internal static class SceneCapture
     {
         try { return ExposureMethod?.Invoke(player, new object[] { slot }) as bool?; }
         catch (Exception) { return null; } // Unsupported game/mod state is unknown, never inferred nude.
+    }
+
+    private static string PronounHint(Pronouns pronouns) => pronouns switch
+    {
+        Pronouns.Male => "he/him",
+        Pronouns.Female => "she/her",
+        _ => "unknown"
+    };
+
+    private static string NpcSexHint(NeuralNPC npc)
+    {
+        // The game's private method applies settings such as noIntersexNPCs,
+        // and invoking it also respects installed Harmony patches.
+        try { return (NpcSexMethod?.Invoke(npc, null) is Sex sex ? sex : npc.sex).ToString().ToLowerInvariant(); }
+        catch (Exception) { return ""; } // Missing state must not prevent generation.
     }
 
     internal static SceneSnapshot Capture(NeuralNPC npc)
@@ -119,7 +136,7 @@ internal static class SceneCapture
         progress("Asking the game's LLM for an " + family + " scene prompt...");
         string response = await ScenePrompts.AwaitLlm(inference.GenerateSimpleLowTemp(family == ModelFamily.Anima ? CharacterScenePrompts.AnimaSystemInstruction : CharacterScenePrompts.IllustriousSystemInstruction,
             new List<string> { ScenePrompts.Build(scene, family, guidance) }, deterministic: false,
-            maxLength: Math.Min(3500, 500 + scene.Characters.Count * 250)),
+            maxLength: Math.Min(3500, 650 + scene.Characters.Count * 300)),
             TimeSpan.FromSeconds(Plugin.LlmTimeoutSeconds.Value), cancel);
         cancel.ThrowIfCancellationRequested();
         string prompt = CharacterScenePrompts.Apply(response, scene, family, out string notice);
@@ -133,6 +150,23 @@ internal static class SceneCapture
             new List<string> { ScenePrompts.ProfileInstruction(character) }, deterministic: false, maxLength: 360),
             TimeSpan.FromSeconds(Plugin.LlmTimeoutSeconds.Value), cancel);
         return ScenePrompts.Clean(response);
+    }
+    internal static async Task<string> GenerateVisionPrompt(SceneSnapshot scene, GenerationSettings settings, string guidance,
+        Action<string> progress, CancellationToken cancel)
+    {
+        // Capture saved profile text on the main thread, independently of game-LLM availability.
+        foreach (SceneCharacter character in scene.Characters)
+            character.Description = Plugin.Profiles.Description(character.Key) ?? character.Description;
+        using var client = new VisionClient(settings.Vision);
+        return await VisionPrompts.GenerateAsync(client, settings.Vision, scene, settings.Family, guidance, settings.Portraits, progress, cancel,
+            (character, draft) =>
+            {
+                if (Plugin.InitializeProfiles.Value && Plugin.Profiles.Description(character.Key) == null && !string.IsNullOrWhiteSpace(draft))
+                {
+                    try { Plugin.Profiles.Set(character.Key, character.Name, draft, "Vision LLM beta"); }
+                    catch (Exception) { settings.PortraitNotice += " Could not save the new visual profile; portrait observations still guide this scene."; }
+                }
+            }, notice => settings.PromptNotice = notice);
     }
     private static InferenceServerSetupHandler ReadyInference()
     {

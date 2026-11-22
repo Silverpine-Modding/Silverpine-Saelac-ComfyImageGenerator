@@ -57,6 +57,29 @@ internal static class Program
                 catch (HttpRequestException ex) { Check(ex.Message.Contains("HTTP 500"), "HTTP upload error is not masked by disposal exception"); }
                 Check(api.Queued == 1, "Failed upload does not submit another job");
             }
+            await VisionRequests();
+            var scene = new SceneSnapshot { Characters = new System.Collections.Generic.List<SceneCharacter> {
+                new SceneCharacter { Key = "player:Dan", Name = "Dan", Description = "An anthro fox with white fur." } }, Environment = "bedroom" };
+            string completed = "Dan is a white-furred anthro fox standing by the bed.";
+            var answer = new JObject { ["characters"] = new JArray(new JObject { ["character_id"] = "player:Dan", ["prompt"] = completed }), ["environment"] = "bedroom" };
+            string assembled = CharacterScenePrompts.ApplyVision(answer.ToString(), scene, ModelFamily.Anima, out _);
+            Check(assembled.Contains("Dan: " + completed) && !assembled.Contains("An anthropomorphic fox with white fur."), "Vision prompt avoids second appearance on Unity Mono");
+            Check(ScenePrompts.CharacterReference(scene.Characters[0], false)["physical_identity_anchor"] == null, "Vision reference omits derived identity copy on Unity Mono");
+            answer["characters"]![0]!["species"] = "arctic fox";
+            answer["characters"]![0]!["prompt"] = "Dan stands in a blue tunic.";
+            Check(CharacterScenePrompts.ApplyVision(answer.ToString(), scene, ModelFamily.Anima, out _).Contains("Dan (arctic fox): Dan stands"),
+                "Explicit species metadata survives vision prompt assembly on Mono");
+            answer["characters"]![0]!["prompt"] = new JObject { ["identity"] = "Dan is an arctic fox", ["body"] = new JObject { ["surface"] = "fur", ["colors"] = new JArray("brown", "white") },
+                ["features"] = new JArray("His neck ruff is white.", JValue.CreateNull()), ["action"] = "Dan stands by the bed." };
+            Check(CharacterScenePrompts.ApplyVision(answer.ToString(), scene, ModelFamily.Anima, out _).Contains(
+                "Dan: Dan is an arctic fox. Dan has brown and white fur. His neck ruff is white. Dan stands by the bed."),
+                "Structured vision facts retain separate sentences and color scope on Unity Mono");
+            answer["characters"]![0]!["prompt"] = new JObject { ["appearance"] = new JArray(new JObject { ["concept"] = "FUR", ["modifiers"] = new JArray("WHITE") }, "blue eyes"),
+                ["identity"] = new JArray("arctic fox", "anthro"), ["pose"] = new JArray("standing"), ["clothing"] = new JArray(new JObject { ["concept"] = "tunic", ["color"] = "blue", ["details"] = new JArray("lacing") }, "white fur") };
+            answer["environment"] = new JArray("bedroom", "warm_light");
+            string tagged = CharacterScenePrompts.ApplyVision(answer.ToString(), scene, ModelFamily.Illustrious, out _);
+            Check(tagged.Contains("arctic fox, anthro, standing, white fur, blue eyes, blue tunic") && tagged.EndsWith("bedroom, warm light"),
+                "Illustrious tag arrays normalize, deduplicate and assemble under Unity Mono");
             try { ThrowPrivateMessage(); }
             catch (Exception ex)
             {
@@ -69,6 +92,55 @@ internal static class Program
     }
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private static void ThrowPrivateMessage() => throw new NullReferenceException("secret prompt https://private.invalid Bearer secret");
+    private static async Task VisionRequests()
+    {
+        foreach (VisionProvider provider in Enum.GetValues(typeof(VisionProvider)))
+        {
+            var options = new VisionSettings { Provider = provider, Model = "test", Address = "http://mock.invalid", Enabled = true };
+            using var api = new VisionApi();
+            using var client = new VisionClient(options, api, TimeSpan.FromMilliseconds(1));
+            string result = await client.RunAsync((v, c) => v.ChatAsync("Describe faithfully.", "Portrait of one character", Png, 256, c), _ => { }, CancellationToken.None);
+            Check(result == "A white fox with blue eyes." && api.ImageReceived, "Vision JSON/image body survives Unity Mono: " + provider);
+            Check(!api.Loaded && api.Unloads > 0, "Vision model unloaded on Unity Mono: " + provider);
+        }
+    }
+    private sealed class VisionApi : HttpMessageHandler
+    {
+        internal bool Loaded, ImageReceived;
+        internal int Unloads;
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancel)
+        {
+            string route = request.RequestUri!.AbsolutePath;
+            JObject body = request.Content == null ? new JObject() : JObject.Parse(await request.Content.ReadAsStringAsync());
+            JToken reply;
+            if (route == "/api/tags") reply = JObject.Parse("{\"models\":[{\"name\":\"test\"}]}");
+            else if (route == "/api/show") reply = JObject.Parse("{\"capabilities\":[\"vision\"]}");
+            else if (route == "/api/v1/models") reply = new JObject { ["models"] = new JArray(new JObject { ["key"] = "test", ["type"] = "llm",
+                ["capabilities"] = JObject.Parse("{\"vision\":true,\"reasoning\":{\"allowed_options\":[\"off\",\"on\"]}}"),
+                ["loaded_instances"] = Loaded ? new JArray(new JObject { ["id"] = "test-instance" }) : new JArray() }) };
+            else if (route == "/api/v1/models/load") { Loaded = true; reply = JObject.Parse("{\"instance_id\":\"test-instance\"}"); }
+            else if (route == "/api/admin/list_options") reply = new JArray("test", "unload_model");
+            else if (route == "/api/admin/reload_config") { Loaded = (string?)body["filename"] != "unload_model"; if (!Loaded) Unloads++; reply = JObject.Parse("{\"success\":true}"); }
+            else if (route == "/api/extra/version") reply = new JObject { ["llm"] = Loaded, ["vision"] = Loaded };
+            else if (route == "/api/ps") reply = new JObject { ["models"] = Loaded ? new JArray(new JObject { ["name"] = "test" }) : new JArray() };
+            else if (route == "/api/generate" || route == "/api/v1/models/unload") { Loaded = false; Unloads++; reply = new JObject(); }
+            else if (route == "/api/chat" || route == "/v1/chat/completions" || route == "/api/v1/chat")
+            {
+                Loaded = true;
+                string? image = route == "/api/chat" ? (string?)body["messages"]?[1]?["images"]?[0] : route == "/api/v1/chat" ?
+                    (string?)body["input"]?[1]?["data_url"] : (string?)body["messages"]?[1]?["content"]?[1]?["image_url"]?["url"];
+                ImageReceived = image != null && image.EndsWith(Convert.ToBase64String(Png), StringComparison.Ordinal);
+                reply = route == "/api/chat" ? JObject.Parse("{\"message\":{\"content\":\"A white fox with blue eyes.\"}}") : JObject.Parse("{\"choices\":[{\"message\":{\"content\":\"A white fox with blue eyes.\"}}]}");
+                if (route == "/api/v1/chat")
+                {
+                    Check((string?)body["reasoning"] == "off" && (bool?)body["store"] == false, "LM Studio native reasoning and persistence controls survive Mono");
+                    reply = JObject.Parse("{\"output\":[{\"type\":\"reasoning\",\"content\":\"private thinking\"},{\"type\":\"message\",\"content\":\"A white fox with blue eyes.\"}]}");
+                }
+            }
+            else throw new Exception("Unexpected vision route " + route);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(reply.ToString(), Encoding.UTF8, "application/json") };
+        }
+    }
     private sealed class UploadApi : HttpMessageHandler
     {
         private readonly JObject nodes = new JObject();

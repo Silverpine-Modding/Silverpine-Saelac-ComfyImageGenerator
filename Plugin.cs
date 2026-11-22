@@ -14,7 +14,8 @@ public sealed class Plugin : BaseUnityPlugin
 {
     public const string PluginGuid = "Saelac.Silverpine.ComfyImageGenerator";
     public const string PluginName = "Comfy Image Generator";
-    public const string PluginVersion = "1.10.1";
+    public const string PluginVersion = "1.11.0";
+    public const string BuildLabel = "1.11.0-beta.6";
     internal static ManualLogSource Log = null!;
     internal static ConfigFile Settings = null!;
     internal static ConfigEntry<string> Server = null!, BearerToken = null!, PortraitUploadId = null!;
@@ -23,6 +24,8 @@ public sealed class Plugin : BaseUnityPlugin
     internal static ConfigEntry<bool> InitializeProfiles = null!;
     internal static ConfigEntry<int> LlmTimeoutSeconds = null!;
     internal static ConfigEntry<string> SceneGuidance = null!;
+    internal static ConfigEntry<string> VisionJson = null!, VisionApiKey = null!;
+    internal static ConfigEntry<bool> ReleaseComfyMemory = null!;
     internal static CharacterProfileStore Profiles = null!;
     internal static Profile Illustrious = null!, Anima = null!;
     internal static string PluginDirectory = "", ImagesDirectory = "";
@@ -43,6 +46,9 @@ public sealed class Plugin : BaseUnityPlugin
         InitializeProfiles = Config.Bind("Characters", "InitializeMissingProfilesWithLlm", true, "On scene generation, attempt to generate missing visual profiles for scene participants. Existing profiles are preserved.");
         LlmTimeoutSeconds = Config.Bind("Characters", "LlmTimeoutSeconds", 120, new ConfigDescription("Timeout per profile or scene-prompt LLM request.", new AcceptableValueRange<int>(10, 600)));
         SceneGuidance = Config.Bind("Generation", "SceneGuidance", "", "Optional art direction appended to scene prompt instructions, including LoRA trigger words if needed.");
+        VisionJson = Config.Bind("Vision LLM Beta", "Settings", Newtonsoft.Json.JsonConvert.SerializeObject(new VisionSettings()), "Optional portrait-based local LLM prompting. Configure in the Vision LLM beta tab. Disabled by default.");
+        VisionApiKey = Config.Bind("Vision LLM Beta", "ApiKey", "", "Optional LLM server token; for KoboldCPP use the admin password. Stored locally; excluded from image/workflow metadata.");
+        ReleaseComfyMemory = Config.Bind("Generation", "ReleaseComfyMemory", true, "Unload ComfyUI models and clear its execution cache after image generation, including cancellation/failure. Always enabled with vision prompting.");
         Profiles = new CharacterProfileStore(Path.Combine(PluginDirectory, "CharacterProfiles"));
         try { Profiles.LoadActive(); }
         catch (Exception ex) { Logger.LogWarning("Character profiles could not be loaded: " + ex.Message); }
@@ -51,7 +57,7 @@ public sealed class Plugin : BaseUnityPlugin
         ModdingToolsMenu.RegisterSession(PluginGuid + ".main", PluginName, (_, session) => GeneratorWindow.Open(session), order: 335);
         InventoryModTools.RegisterSession(PluginGuid + ".inventory", PluginName, (_, session) => GeneratorWindow.Open(session), order: 335);
         new Harmony(PluginGuid).PatchAll(typeof(Plugin).Assembly);
-        Logger.LogInfo($"{PluginName} {PluginVersion} registered. Images: {ImagesDirectory}");
+        Logger.LogInfo($"{PluginName} {BuildLabel} registered. Images: {ImagesDirectory}");
     }
     // Static menu registrations and managed jobs survive Silverpine's bootstrap-host destruction.
 }

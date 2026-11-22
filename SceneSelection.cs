@@ -30,7 +30,7 @@ public static class SceneSelection
             // Keep reference order stable, independent of the order of clicks.
             Characters = participants.Where(c => keys.Contains(c.Key)).Select(c => new SceneCharacter
             {
-                Key = c.Key, Name = c.Name, Description = c.Description, Species = c.Species,
+                Key = c.Key, Name = c.Name, Description = c.Description, Species = c.Species, Sex = c.Sex, Pronouns = c.Pronouns,
                 Clothing = new SceneClothing
                 {
                     State = c.Clothing.State, EquipmentKnown = c.Clothing.EquipmentKnown,

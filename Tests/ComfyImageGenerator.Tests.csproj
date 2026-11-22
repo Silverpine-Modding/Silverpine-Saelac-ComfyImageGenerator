@@ -9,6 +9,11 @@
     <Compile Include="..\Workflow.cs" Link="Workflow.cs" />
     <Compile Include="..\Detailers.cs" Link="Detailers.cs" />
     <Compile Include="..\ComfyClient.cs" Link="ComfyClient.cs" />
+    <Compile Include="..\ComfyMemory.cs" Link="ComfyMemory.cs" />
+    <Compile Include="..\VisionSettings.cs" Link="VisionSettings.cs" />
+    <Compile Include="..\VisionClient.cs" Link="VisionClient.cs" />
+    <Compile Include="..\VisionPrompts.cs" Link="VisionPrompts.cs" />
+    <Compile Include="..\GenerationPipeline.cs" Link="GenerationPipeline.cs" />
     <Compile Include="..\PortraitReferences.cs" Link="PortraitReferences.cs" />
     <Compile Include="..\PortraitUploads.cs" Link="PortraitUploads.cs" />
     <Compile Include="..\GenerationDiagnostics.cs" Link="GenerationDiagnostics.cs" />

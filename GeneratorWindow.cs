@@ -99,6 +99,7 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
             window.family = Plugin.Family.Value;
             window.LoadProfile();
             window.guidance = Plugin.SceneGuidance.Value;
+            window.LoadVisionSettings();
             return window;
         }
         catch
@@ -154,6 +155,7 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
         Loras = loras.Select(l => new LoraSetting { Name = l.Name, ModelStrength = Number(l.Model, "LoRA model strength"), ClipStrength = Number(l.Clip, "LoRA CLIP strength") }).ToList(),
         Detailers = detailers.Select(d => d.Read()).ToList(),
         PortraitSettings = ReadPortraitSettings(),
+        Vision = ReadVisionSettings(), ReleaseComfyMemory = releaseComfyMemory,
         EasyCache = easyCache, CacheThreshold = Number(threshold, "Cache threshold"), CacheStart = Number(cacheStart, "Cache start"), CacheEnd = Number(cacheEnd, "Cache end")
     };
     private static int Int(string text, string name) => int.TryParse(text, NumberStyles.Integer, Inv, out int value) ? value : throw new ArgumentException(name + " must be an integer.");
@@ -180,6 +182,9 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
             p.DetailersJson.Value = JsonConvert.SerializeObject(s.Detailers);
             p.PortraitJson.Value = JsonConvert.SerializeObject(s.PortraitSettings);
             p.CacheThreshold.Value = s.CacheThreshold; p.CacheStart.Value = s.CacheStart; p.CacheEnd.Value = s.CacheEnd;
+            Plugin.VisionJson.Value = JsonConvert.SerializeObject(s.Vision);
+            Plugin.VisionApiKey.Value = s.Vision.ApiKey;
+            Plugin.ReleaseComfyMemory.Value = releaseComfyMemory;
         }
         finally { Plugin.Settings.SaveOnConfigSet = save; }
         Plugin.Settings.Save();
@@ -193,6 +198,7 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
             if (GenerationService.Busy || profileBusy) throw new InvalidOperationException("Wait for the current request to finish.");
             SceneSnapshot scene = SelectedLiveScene();
             GenerationSettings settings = Snapshot("Scene prompt pending");
+            if (settings.Vision.Enabled) settings.Vision.Validate();
             settings.SceneCharacterKeys = scene.Characters.Select(c => c.Key).ToList();
             SceneSelection.ValidateGeneration(settings);
             PortraitCapture.Capture(settings);
@@ -203,7 +209,9 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
             ReleasePreview();
             string sceneGuidance = guidance;
             GenerationService.Start(settings, Address(), Plugin.BearerToken.Value, Plugin.ImagesDirectory, Plugin.TimeoutMinutes.Value,
-                (progress, cancel) => SceneCapture.GeneratePrompt(scene, settings.Family, sceneGuidance, progress, cancel, notice => settings.PromptNotice = notice));
+                (progress, cancel) => settings.Vision.Enabled
+                    ? SceneCapture.GenerateVisionPrompt(scene, settings, sceneGuidance, progress, cancel)
+                    : SceneCapture.GeneratePrompt(scene, settings.Family, sceneGuidance, progress, cancel, notice => settings.PromptNotice = notice));
             page = 0; SetPromptEditing(false); status = "";
         });
         if (!GenerationService.Busy && model.Length == 0) page = 1;
@@ -214,7 +222,7 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
         {
             GenerationSettings settings = Snapshot(positive);
             SceneSelection.ValidateGeneration(settings);
-            PortraitCapture.Capture(settings);
+            PortraitCapture.Capture(settings, includeVision: false);
             settings.Validate();
             SaveSettings();
             ReleasePreview();
@@ -291,7 +299,7 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
     private void DrawGui()
     {
         GUI.Box(new Rect(12, 12, 1576, 876), GUIContent.none, panel);
-        GUI.Label(new Rect(32, 24, 640, 40), "Comfy scene generator  /  " + family, title);
+        GUI.Label(new Rect(32, 24, 700, 40), "Comfy " + Plugin.BuildLabel + "  /  " + family, title);
         GUI.enabled = !GenerationService.Busy && !profileBusy;
         if (GUI.Button(new Rect(755, 24, 275, 38), "Choose characters", button)) OpenCastPicker(NeuralNPC.currentActiveDialogNeuralNPC);
         GUI.enabled = true;
@@ -434,10 +442,11 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
         if (GUILayout.Button("Connection, model & LoRAs", button, GUILayout.Height(36))) page = 1;
         if (GUILayout.Button("Detailers", button, GUILayout.Height(36))) page = 3;
         if (GUILayout.Button("Portrait references", button, GUILayout.Height(36))) page = 4;
+        if (GUILayout.Button("Vision LLM (beta)", button, GUILayout.Height(36))) page = 8;
         if (GUILayout.Button("Character profiles & presets", button, GUILayout.Height(36))) { page = 2; Try(RefreshCharacters); }
         GUILayout.EndHorizontal();
         scroll = GUILayout.BeginScrollView(scroll);
-        if (page == 2) DrawCharacters(); else if (page == 3) DrawDetailers(); else if (page == 4) DrawPortraitSettings(); else DrawModelSettings();
+        if (page == 2) DrawCharacters(); else if (page == 3) DrawDetailers(); else if (page == 4) DrawPortraitSettings(); else if (page == 8) DrawVisionSettings(); else DrawModelSettings();
         GUILayout.EndScrollView();
         GUI.enabled = true;
         GUILayout.EndArea();
@@ -478,7 +487,7 @@ internal sealed partial class GeneratorWindow : ModToolBehaviour
         scheduler = PickRow("Scheduler", scheduler, "KSampler", "scheduler", v => scheduler = v);
         GUILayout.Label("Base positive prompt (always prepended)", title);
         basePositive = ScrollablePrompt(GUILayoutUtility.GetRect(GUIContent.none, GUIStyle.none, GUILayout.Height(96), GUILayout.ExpandWidth(true)), basePositive, ref basePositiveSettingsScroll);
-        GUILayout.Label("Reusable style tags or wording, added directly before every scene, regeneration and detailer positive prompt. Saved separately for Illustrious and Anima. Leave blank to disable.", label);
+        GUILayout.Label("Reusable style tags or wording, added directly before every scene, regeneration and detailer positive prompt. Keep this concise so the cast and action appear early. Saved separately for Illustrious and Anima. Leave blank to disable.", label);
         negative = Row("Negative prompt", negative);
         guidance = Row("Scene direction / LoRA triggers", guidance);
         GUILayout.Label("LoRAs (applied in list order; use files compatible with the selected model)", title);

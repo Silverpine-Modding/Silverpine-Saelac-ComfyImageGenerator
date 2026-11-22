@@ -50,24 +50,18 @@ internal static class GenerationService
             try
             {
                 using var client = new ComfyClient(address, bearerToken);
-                if (promptFactory != null)
-                {
-                    SetStatus("Checking ComfyUI before asking the LLM...");
-                    var serverInfo = await Task.Run(() => client.CheckConnectionAsync(source.Token));
-                    await Task.Run(() => Workflow.ValidateServer(Workflow.Build(settings, settings.ResolveSeed()), serverInfo));
-                    source.Token.ThrowIfCancellationRequested();
-                }
-                if (promptFactory != null) settings.Positive = await promptFactory(SetStatus, source.Token);
-                source.Token.ThrowIfCancellationRequested();
-                // Expose only editable scene text; Workflow adds the separately saved style prefix once.
-                lock (Gate)
-                {
-                    prompt = settings.Positive;
-                    promptFamily = settings.Family;
-                    promptCharacterKeys = settings.SceneCharacterKeys.ToArray();
-                    promptRevision++;
-                }
-                GenerationResult generated = await Task.Run(() => client.GenerateAsync(settings, directory, TimeSpan.FromMinutes(minutes), SetStatus, source.Token)).ConfigureAwait(false);
+                GenerationResult generated = await GenerationPipeline.RunAsync(client, settings, directory, TimeSpan.FromMinutes(minutes), SetStatus,
+                    source.Token, promptFactory, text =>
+                    {
+                        // Expose scene text only; styling is added once by Workflow.
+                        lock (Gate)
+                        {
+                            prompt = text;
+                            promptFamily = settings.Family;
+                            promptCharacterKeys = settings.SceneCharacterKeys.ToArray();
+                            promptRevision++;
+                        }
+                    });
                 lock (Gate)
                 {
                     if (discard) TemporaryImages.DeleteRun(directory, generated.Directory);
@@ -90,7 +84,11 @@ internal static class GenerationService
             }
             finally
             {
-                lock (Gate) { cancellation = null; source.Dispose(); }
+                lock (Gate)
+                {
+                    if (settings.CleanupNotice.Length > 0) status += "\n" + settings.CleanupNotice;
+                    cancellation = null; source.Dispose();
+                }
             }
         }
     }

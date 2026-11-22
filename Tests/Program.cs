@@ -23,10 +23,13 @@ internal static partial class Program
     {
         if (args.Length == 2 && args[0] == "--portrait-live") return await LivePortraits(args[1]);
         if (args.Length == 2 && args[0] == "--reference-size-live") return await LivePortraits(args[1], referenceSizes: true);
+        if (args.Length == 2 && args[0] == "--vision-live") return await LiveVision(args[1]);
         Directory.CreateDirectory(Root);
         try
         {
-            Workflows(); DetailerWorkflows(); DetailerWildcards(); SceneUnderstanding(); SceneSelections(); AnimaIdentity(); PromptTolerance(); SaveDialogRequests(); Profiles(); Prompts(); BasePositivePrompts();
+            Workflows(); DetailerWorkflows(); DetailerWildcards(); SceneUnderstanding(); SceneSelections(); AnimaIdentity(); SceneCompositions(); PromptTolerance(); SaveDialogRequests(); Profiles(); Prompts(); BasePositivePrompts();
+            await SceneCompositionApi();
+            await VisionApis();
             await DetailerWildcardApi();
             await LlmWaits();
             await ApiSuccess();
@@ -295,6 +298,10 @@ internal static partial class Program
         internal JObject? SubmittedGraph;
         internal int Uploads;
         internal bool BadUpload;
+        internal bool FailFree, RetainVram, UnknownMemoryBackend;
+        internal int FreeCalls, MemoryChecks, BusyQueueChecks;
+        internal Action? OnFree;
+        internal Action? OnGenerate;
         internal Action? OnUpload;
         internal readonly List<string> UploadedPaths = new();
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancel)
@@ -302,6 +309,19 @@ internal static partial class Program
             string route = request.RequestUri!.AbsolutePath.Replace("/proxy/", "");
             Routes.Add(request.Method + " " + route);
             if (route == "object_info") return Json(Nodes);
+            if (route == "queue") return Json(new JObject { ["queue_running"] = BusyQueueChecks-- > 0 ? new JArray(new JArray(0, "other-job")) : new JArray(), ["queue_pending"] = new JArray() });
+            if (route == "free")
+            {
+                FreeCalls++; OnFree?.Invoke();
+                JObject body = JObject.Parse(await request.Content!.ReadAsStringAsync(cancel));
+                Check((bool?)body["unload_models"] == true && (bool?)body["free_memory"] == true, "model AND cache cleanup requested");
+                return new HttpResponseMessage(FailFree ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.OK) { Content = new StringContent("") };
+            }
+            if (route == "system_stats")
+            {
+                MemoryChecks++;
+                return Json(new JObject { ["devices"] = new JArray(new JObject { ["type"] = UnknownMemoryBackend ? "mps" : "cuda", ["torch_vram_total"] = RetainVram ? 1024L * 1024 * 1024 : 0 }) });
+            }
             if (route == "upload/image")
             {
                 var form = (MultipartFormDataContent)request.Content!;
@@ -330,6 +350,7 @@ internal static partial class Program
                 SubmittedGraph = (JObject?)body["prompt"];
                 Check(Guid.TryParse(Id, out _), "client supplied UUID");
                 Queued++;
+                OnGenerate?.Invoke();
                 if (OnSubmit != null) await OnSubmit(cancel);
                 return Json(new JObject { ["prompt_id"] = Id });
             }

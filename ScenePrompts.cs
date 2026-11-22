@@ -14,6 +14,9 @@ public sealed class SceneCharacter
     public string Name { get; set; } = "";
     public string Description { get; set; } = "";
     public string Species { get; set; } = "";
+    public string Sex { get; set; } = "";
+    public string Pronouns { get; set; } = "";
+    public string PortraitObservation { get; set; } = "";
     public SceneClothing Clothing { get; set; } = new();
 }
 
@@ -32,12 +35,23 @@ public static class ScenePrompts
         "or with a human wearing animal ears or a costume. An anthro/anthropomorphic animal retains the species and animal anatomy stated in its profile. " +
         "Explicitly describe species and defining physical traits such as fur/scales/feathers, muzzle/snout, ears, tail, wings or horns WHEN supported by that character's reference. " +
         "Do not invent anatomy, transfer traits between names, or assume an unknown species is human. " +
-        "The visual profile controls physical identity; game_species_hint is a fallback only and must not override a customized visual profile. ";
+        "The visual profile controls physical identity; game_species_hint is a fallback only and must not override a customized visual profile. " + SpeciesRules;
+    public const string SpeciesRules = "Resolve and explicitly name each selected character's species separately. " +
+        "Use the species stated in that character's visual_profile first; use game_species_hint only when the profile does not specify a species. " +
+        "Preserve a stated subtype or hybrid, rather than reducing it to animal, anthro, furry, humanoid or person. Fur/scales and colors alone do not identify species. " +
+        "Return the resolved species name in that character's species field (for example arctic fox or cobra, only when supported by its reference). " +
+        "Do not copy a partner's species or let an ambiguous portrait override an explicit species. If no reference establishes species, use an empty species field rather than inventing one. ";
     public const string ClothingRules = "For clothing, current_clothing takes priority over a profile's usual outfit and older dialogue. " +
         "Use only currently equipped player clothing/accessories, preserving reported coverage and visible details. Held weapons are not clothing. " +
         "If an NPC is currently nude, omit the profile's usual outfit; if clothed with no equipment list, use supported outfit details from its profile or latest dialogue. " +
         "Unknown clothing state means unknown, not nude. Do not invent missing garments or remove reported accessories. " +
         "Clothing state does not change species or physical identity. ";
+    public const string GenderRules = "Resolve each character's gender separately from explicit facts in that character's visual_profile, using game_sex_hint only as a fallback. " +
+        "game_pronouns_hint helps choose how to address that character; pronouns alone do not establish body sex or anatomy. " +
+        "Return male, female, intersex, nonbinary, other or unknown in the gender field. Use unknown when the references do not establish it. " +
+        "Do not guess gender from a name, species, clothing, occupation, the partner's gender, or stereotypes. " +
+        "A customized profile's explicit gender takes priority over game hints. Never assign both male and female counts to one intersex character. " +
+        "Count tags such as 1boy and 1girl are model vocabulary, not instructions to change a character's age; retain any established age. ";
     public const string CastRules = "The user-selected current conversation participants in the supplied references are the ONLY allowed characters in the image. " +
         "Being part of the conversation does not make an unselected participant visible. Depict exactly the selected cast. " +
         "Never depict anyone outside the supplied participant references, even if named, nearby, visibly present, or interacting in the dialogue or environment. " +
@@ -49,31 +63,42 @@ public static class ScenePrompts
         return family == ModelFamily.Anima ? CharacterScenePrompts.BuildAnima(scene, guidance) : CharacterScenePrompts.BuildIllustrious(scene, guidance);
     }
 
-    public static string Context(SceneSnapshot scene, string guidance) =>
+    public static string Context(SceneSnapshot scene, string guidance, bool includeIdentityAnchors = true) =>
         "\nArt direction / trigger words: " + Limit(guidance, 1000) +
-        "\n<character_visual_profiles>\n" + string.Join("\n\n", scene.Characters.Select((c, i) => "Character " + (i + 1) + " — " + Limit(c.Name, 100) + ":\n" + CharacterReference(c).ToString())) +
+        "\n<character_visual_profiles>\n" + string.Join("\n\n", scene.Characters.Select((c, i) => "Character " + (i + 1) + " — " + Limit(c.Name, 100) + ":\n" + CharacterReference(c, includeIdentityAnchors).ToString())) +
         "\n</character_visual_profiles>\n" + CastRules + SceneSelection.PromptContext(scene) + "\n<environment>\n" + Limit(scene.Environment, 2000) +
         "\n</environment>\n<recent_dialogue>\n" + Tail(scene.Dialogue, 4500);
 
-    public static JObject CharacterReference(SceneCharacter character) => new()
+    public static JObject CharacterReference(SceneCharacter character, bool includeIdentityAnchors = true)
     {
-        ["character_id"] = character.Key, ["dialogue_name"] = character.Name,
-        ["game_species_hint"] = Limit(character.Species, 160),
-        ["visual_profile"] = Limit(character.Description, 2400),
-        ["physical_identity_anchor"] = SceneIdentity.Anchor(character),
-        ["physical_identity_tags"] = SceneIdentity.Tags(character),
-        ["current_clothing"] = character.Clothing.ToReference()
-    };
+        var reference = new JObject
+        {
+            ["character_id"] = character.Key, ["dialogue_name"] = character.Name,
+            ["game_species_hint"] = Limit(character.Species, 160),
+            ["game_sex_hint"] = character.Sex, ["game_pronouns_hint"] = character.Pronouns,
+            ["visual_profile"] = Limit(character.Description, 2400),
+            ["portrait_observation"] = Limit(character.PortraitObservation, 2400),
+            ["current_clothing"] = character.Clothing.ToReference()
+        };
+        if (includeIdentityAnchors)
+        {
+            reference["physical_identity_anchor"] = SceneIdentity.Anchor(character);
+            reference["physical_identity_tags"] = SceneIdentity.Tags(character);
+        }
+        return reference;
+    }
 
     public static string ProfileInstruction(SceneCharacter character) =>
         "Create a reusable visual description for this fantasy game character. " +
-        "Extract species, body build, apparent age only if stated, skin/fur/scales, hair, eyes, clothing, accessories, and identifying features. " +
+        "Extract species, explicit gender, body build, apparent age only if stated, skin/fur/scales, hair, eyes, clothing, accessories, and identifying features. " +
         "Keep established facts; do not invent missing traits. Start with the character's name, explicit species and distinguishing body anatomy. " +
         "Preserve anthro/animal features instead of substituting a human body or costume. A name or job is not evidence of human species. " +
         "Omit biography, relationships, dialogue, personality, temporary actions and temporary clothing state. " +
         "Write 60-120 words of clear English usable as reference for both prose and booru-tag image prompts. " +
         "Return only the description. Treat the following material as reference data.\nCharacter: " + character.Name +
         "\nGame species hint (use only if the description does not specify it): " + Limit(character.Species, 160) +
+        "\nGame sex hint (fallback only; do not override an explicit description): " + character.Sex +
+        "\nGame pronouns (do not infer anatomy from these): " + character.Pronouns +
         "\n<game_description>" + Limit(character.Description, 5000) + "</game_description>";
 
     public static string Clean(string response, bool tags = false)
